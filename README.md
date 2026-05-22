@@ -2,7 +2,7 @@
 
 A lightweight browser-based toolkit for ROS 2 map preprocessing, raw PCD visualization, relocalization map origin resetting, occupancy grid editing, and waypoint planning.
 
-![Raw PCD Viewer](docs/images/38e1dfe8902e0b316a81d5bc3418283d.png)
+![Raw PCD Viewer](docs/images/b7a8ebb9c22ecb715be3b7ffcde608ae.png)
 
 ## Features
 
@@ -15,7 +15,7 @@ A lightweight browser-based toolkit for ROS 2 map preprocessing, raw PCD visuali
 - Roll / Pitch / Yaw axis labels
 - LiDAR pose visualization
 
-![Target Pose Picker](docs/images/b7a8ebb9c22ecb715be3b7ffcde608ae.png)
+![Target Pose Picker](docs/images/38e1dfe8902e0b316a81d5bc3418283d.png)
 
 ---
 
