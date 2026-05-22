@@ -2,7 +2,7 @@
 
 一个轻量级、浏览器端运行的 ROS 2 地图预处理工具，用于原始 PCD 点云查看、地图原点重设、二维占据栅格地图编辑以及航点路径规划。
 
-![原始点云查看器](docs/images/38e1dfe8902e0b316a81d5bc3418283d.png)
+![原始点云查看器](docs/images/b7a8ebb9c22ecb715be3b7ffcde608ae.png)
 
 ---
 
@@ -17,7 +17,7 @@
 - Roll / Pitch / Yaw 坐标轴标签
 - 激光雷达位姿显示
 
-![目标起点位姿拾取](docs/images/b7a8ebb9c22ecb715be3b7ffcde608ae.png)
+![目标起点位姿拾取](docs/images/38e1dfe8902e0b316a81d5bc3418283d.png)
 
 ---
 
