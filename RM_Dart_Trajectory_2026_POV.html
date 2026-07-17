@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RoboMaster 2026 飞镖轨迹预测可视化</title>
+<style>
+  :root {
+    --bg: #071019;
+    --panel: #0d1824;
+    --panel2: #101f2d;
+    --line: #20364a;
+    --text: #d6e2ea;
+    --muted: #7890a2;
+    --cyan: #45d7ff;
+    --green: #5cff84;
+    --orange: #ffad42;
+    --red: #ff5a68;
+    --blue: #438cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body { font-family: Consolas, "Microsoft YaHei", "PingFang SC", monospace; color: var(--text); }
+  button, input, select { font: inherit; }
+  #app { display: flex; width: 100%; height: 100%; }
+  #sidebar {
+    width: 360px; min-width: 360px; height: 100%; overflow-y: auto;
+    background: linear-gradient(180deg, #0e1b28 0%, #09131d 100%);
+    border-right: 1px solid var(--line); z-index: 20;
+  }
+  #sidebar::-webkit-scrollbar { width: 5px; }
+  #sidebar::-webkit-scrollbar-thumb { background: #29445b; border-radius: 6px; }
+  .brand { padding: 15px 16px 12px; border-bottom: 1px solid var(--line); }
+  .brand h1 { font-size: 15px; color: var(--cyan); letter-spacing: 1.2px; }
+  .brand p { margin-top: 4px; font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .section { padding: 12px 16px; border-bottom: 1px solid #182b3c; }
+  .section-title { color: #7695aa; font-size: 10px; letter-spacing: 1.5px; margin-bottom: 10px; text-transform: uppercase; }
+  .rule-box { display: grid; gap: 6px; }
+  .rule-item { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; padding: 7px 8px; border: 1px solid #20384c; background: #0a1620; border-radius: 5px; }
+  .rule-item span:first-child { color: #83a0b4; }
+  .rule-item span:last-child { color: #c4d9e5; text-align: right; }
+  .param-row { margin-bottom: 11px; }
+  .param-row:last-child { margin-bottom: 0; }
+  .param-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 11px; }
+  .param-name { color: #9ab0bf; }
+  .param-value { color: var(--cyan); font-weight: 700; }
+  .unit { color: #617b8d; font-size: 9px; margin-left: 3px; }
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: #21384b; border-radius: 4px; outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px #45d7ff88; cursor: pointer; }
+  input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--cyan); cursor: pointer; }
+  select { width: 100%; padding: 8px 9px; border-radius: 5px; color: #cfe1eb; background: #0b1823; border: 1px solid #28465e; outline: none; }
+  .toggle-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .toggle { display: flex; align-items: center; gap: 7px; padding: 7px 8px; background: #0b1823; border: 1px solid #223c50; border-radius: 5px; font-size: 10px; cursor: pointer; }
+  .toggle input { accent-color: var(--cyan); }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .card { background: #09141e; border: 1px solid #20384c; border-radius: 6px; padding: 8px; min-height: 57px; }
+  .card .label { color: #698598; font-size: 9px; margin-bottom: 5px; }
+  .card .value { font-size: 15px; font-weight: 700; color: #dcecf4; }
+  .card .sub { color: #678093; font-size: 9px; margin-top: 2px; }
+  .hit .value { color: var(--green); }
+  .miss .value { color: var(--red); }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .btn { border: 1px solid #2b536d; background: #102536; color: #c7dce7; padding: 9px 8px; border-radius: 6px; cursor: pointer; transition: 0.18s; }
+  .btn:hover { border-color: var(--cyan); color: var(--cyan); background: #143044; }
+  .btn.primary { color: #04131a; background: var(--cyan); border-color: var(--cyan); font-weight: 700; }
+  .btn.primary:hover { background: #72e2ff; color: #04131a; }
+  .btn.wide { grid-column: 1 / -1; }
+  .warning { margin-top: 8px; padding: 8px; border-radius: 5px; border: 1px solid #684426; background: #2c1f13; color: #ffbf68; font-size: 10px; line-height: 1.45; display: none; }
+  #viewport { position: relative; flex: 1; height: 100%; min-width: 0; }
+  #viewport canvas { display: block; }
+  .topbar {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5;
+    padding: 9px 16px; border-radius: 7px; border: 1px solid #25445a;
+    background: rgba(7, 17, 27, 0.87); backdrop-filter: blur(8px); text-align: center; pointer-events: none;
+  }
+  .topbar h2 { color: var(--cyan); font-size: 13px; letter-spacing: 2px; }
+  .topbar p { margin-top: 3px; color: #6d8799; font-size: 9px; }
+  .hud {
+    position: absolute; left: 14px; right: 14px; bottom: 14px; z-index: 5;
+    display: flex; justify-content: space-between; gap: 12px; align-items: center;
+    padding: 9px 12px; border-radius: 7px; border: 1px solid #25445a;
+    background: rgba(7, 17, 27, 0.88); backdrop-filter: blur(8px); font-size: 10px; color: #7791a4; pointer-events: none;
+  }
+  .hud strong { color: #cfe3ed; }
+  .camera-tools { position: absolute; right: 14px; top: 84px; z-index: 7; display: grid; gap: 6px; }
+  .cam-btn { width: 56px; padding: 7px 4px; background: rgba(10, 26, 38, 0.9); border: 1px solid #284b62; border-radius: 5px; color: #89a6b8; font-size: 9px; cursor: pointer; }
+  .cam-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+  #status-pill { position: absolute; left: 14px; top: 14px; z-index: 8; padding: 7px 10px; border-radius: 999px; font-size: 10px; border: 1px solid #2a495e; background: rgba(8, 20, 30, .9); color: #9bb1bf; }
+  #status-pill.hit { color: var(--green); border-color: #2d7044; }
+  #status-pill.miss { color: var(--red); border-color: #7e3340; }
+  #pov-panel {
+    position: absolute; right: 84px; top: 84px; z-index: 9;
+    width: min(38vw, 520px); min-width: 320px; aspect-ratio: 16 / 9;
+    overflow: hidden; border-radius: 9px; border: 1px solid #2d5871;
+    background: #02070b; box-shadow: 0 12px 38px rgba(0, 0, 0, .46);
+    transition: opacity .2s, transform .2s; transform-origin: top right;
+  }
+  #pov-panel.hidden { opacity: 0; transform: scale(.96); pointer-events: none; }
+  #pov-render { position: absolute; inset: 0; }
+  #pov-render canvas { width: 100% !important; height: 100% !important; display: block; }
+  .pov-head {
+    position: absolute; left: 0; right: 0; top: 0; z-index: 3;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 9px; color: #c8e8f5; font-size: 9px; letter-spacing: .7px;
+    background: linear-gradient(180deg, rgba(2, 9, 14, .88), rgba(2, 9, 14, 0));
+    pointer-events: none;
+  }
+  .pov-rec { color: #ff6571; }
+  .pov-rec::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #ff5362; box-shadow: 0 0 8px #ff5362; }
+  #pov-panel.flying .pov-rec::before { animation: povBlink .8s steps(1) infinite; }
+  @keyframes povBlink { 50% { opacity: .25; } }
+  .pov-crosshair { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+  .pov-crosshair::before, .pov-crosshair::after { content: ''; position: absolute; left: 50%; top: 50%; background: rgba(92, 255, 132, .88); box-shadow: 0 0 5px rgba(92, 255, 132, .58); transform: translate(-50%, -50%); }
+  .pov-crosshair::before { width: 34px; height: 1px; }
+  .pov-crosshair::after { width: 1px; height: 34px; }
+  .pov-crosshair span { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; border: 1px solid rgba(92, 255, 132, .88); border-radius: 50%; transform: translate(-50%, -50%); }
+  .pov-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; box-shadow: inset 0 0 75px 18px rgba(0, 0, 0, .68); }
+  .pov-telemetry {
+    position: absolute; left: 8px; right: 8px; bottom: 9px; z-index: 3;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+    color: #8fb1c3; font-size: 8px; pointer-events: none;
+  }
+  .pov-data { padding: 5px 6px; border: 1px solid rgba(55, 104, 130, .62); border-radius: 4px; background: rgba(2, 11, 17, .72); }
+  .pov-data b { display: block; margin-top: 2px; color: #e3f4fb; font-size: 11px; font-weight: 600; }
+  .pov-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 4; background: rgba(45, 72, 88, .55); }
+  #pov-progress-bar { display: block; width: 0%; height: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  #toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; padding: 12px 18px; border-radius: 7px; background: rgba(5, 14, 22, .94); border: 1px solid var(--cyan); color: #d8edf6; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  #loading { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: #071019; color: var(--cyan); font-size: 13px; letter-spacing: 1px; }
+  @media (max-width: 900px) {
+    #sidebar { width: 315px; min-width: 315px; }
+    .topbar { display: none; }
+    #pov-panel { right: 76px; width: min(43vw, 420px); min-width: 260px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <h1>RM 2026 飞镖轨迹预测</h1>
+      <p>三维飞镖、飞镖发射架、基地/前哨站检测模块与含风阻弹道。坐标：X 前向，Y 竖直，Z 横向。</p>
+    </div>
+
+    <section class="section">
+      <div class="section-title">2026 规则约束</div>
+      <div class="rule-box">
+        <div class="rule-item"><span>飞镖</span><span>≤0.35 kg；≤250×250×150 mm</span></div>
+        <div class="rule-item"><span>发射架</span><span>Pitch 25°–45°；Yaw 不限；4 枚</span></div>
+        <div class="rule-item"><span>整机边界</span><span>1000×600×1000 mm；底框 950×550 mm</span></div>
+        <div class="rule-item"><span>测速提示</span><span>初速度超过 25 m/s 可能漏检</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">目标配置</div>
+      <div class="param-row">
+        <div class="param-head"><span class="param-name">目标类型</span></div>
+        <select id="target-type">
+          <option value="base">基地飞镖检测模块</option>
+          <option value="outpost">前哨站飞镖检测模块</option>
+        </select>
+      </div>
+      <div class="param-row"><div class="param-head"><span class="param-name">枪口至目标距离</span><span><b class="param-value" id="val-distance">15.0</b><span class="unit">m</span></span></div><input id="distance" type="range" min="5" max="30" step="0.1" value="15.0"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">检测窗中心高度</span><span><b class="param-value" id="val-target-height">1.143</b><span class="unit">m</span></span></div><input id="target-height" type="range" min="0.7" max="2.0" step="0.001" value="1.143"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">检测窗宽度</span><span><b class="param-value" id="val-window-width">140</b><span class="unit">mm</span></span></div><input id="window-width" type="range" min="80" max="220" step="1" value="140"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">检测窗高度</span><span><b class="param-value" id="val-window-height">125</b><span class="unit">mm</span></span></div><input id="window-height" type="range" min="70" max="200" step="1" value="125"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">发射参数</div>
+      <div class="param-row"><div class="param-head"><span class="param-name">初速度 v₀</span><span><b class="param-value" id="val-speed">14.0</b><span class="unit">m/s</span></span></div><input id="speed" type="range" min="6" max="30" step="0.1" value="14.0"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">仰角 Pitch</span><span><b class="param-value" id="val-pitch">25.0</b><span class="unit">°</span></span></div><input id="pitch" type="range" min="25" max="45" step="0.1" value="25.0"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">偏航角 Yaw</span><span><b class="param-value" id="val-yaw">0.0</b><span class="unit">°</span></span></div><input id="yaw" type="range" min="-15" max="15" step="0.1" value="0.0"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">发射一致性 σ</span><span><b class="param-value" id="val-dispersion">0.35</b><span class="unit">%</span></span></div><input id="dispersion" type="range" min="0" max="2" step="0.05" value="0.35"></div>
+      <div id="speed-warning" class="warning">当前初速度超过 25 m/s。规则手册提示：裁判系统可能无法检测到飞镖。</div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">飞镖与环境</div>
+      <div class="param-row"><div class="param-head"><span class="param-name">飞镖质量</span><span><b class="param-value" id="val-mass">320</b><span class="unit">g</span></span></div><input id="mass" type="range" min="120" max="350" step="1" value="320"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">飞镖长度</span><span><b class="param-value" id="val-dart-length">240</b><span class="unit">mm</span></span></div><input id="dart-length" type="range" min="150" max="250" step="1" value="240"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">翼展</span><span><b class="param-value" id="val-wingspan">220</b><span class="unit">mm</span></span></div><input id="wingspan" type="range" min="100" max="250" step="1" value="220"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">阻力系数 Cd</span><span><b class="param-value" id="val-cd">0.28</b></span></div><input id="cd" type="range" min="0.05" max="0.90" step="0.01" value="0.28"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">等效迎风直径</span><span><b class="param-value" id="val-eq-diameter">55</b><span class="unit">mm</span></span></div><input id="eq-diameter" type="range" min="25" max="120" step="1" value="55"></div>
+      <div class="param-row"><div class="param-head"><span class="param-name">横风（+Z）</span><span><b class="param-value" id="val-wind-z">0.0</b><span class="unit">m/s</span></span></div><input id="wind-z" type="range" min="-6" max="6" step="0.1" value="0.0"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">显示层</div>
+      <div class="toggle-row">
+        <label class="toggle"><input id="show-drag" type="checkbox" checked>含风阻轨迹</label>
+        <label class="toggle"><input id="show-ideal" type="checkbox" checked>理想轨迹</label>
+        <label class="toggle"><input id="show-cloud" type="checkbox" checked>误差散布</label>
+        <label class="toggle"><input id="show-envelope" type="checkbox" checked>规则边界</label>
+        <label class="toggle"><input id="show-station" type="checkbox" checked>发射站轮廓</label>
+        <label class="toggle"><input id="strict-hit" type="checkbox" checked>触发器全投影</label>
+        <label class="toggle"><input id="show-pov" type="checkbox" checked>飞镖第一视角</label>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">预测结果</div>
+      <div class="results">
+        <div id="hit-card" class="card"><div class="label">判定</div><div id="result-hit" class="value">--</div><div id="result-window" class="sub">--</div></div>
+        <div class="card"><div class="label">中心偏差</div><div id="result-miss" class="value">--</div><div class="sub">目标平面内</div></div>
+        <div class="card"><div class="label">飞行时间</div><div id="result-time" class="value">--</div><div class="sub">到达检测面</div></div>
+        <div class="card"><div class="label">终端速度</div><div id="result-terminal" class="value">--</div><div class="sub">m/s</div></div>
+        <div class="card"><div class="label">最高点</div><div id="result-apex" class="value">--</div><div class="sub">m</div></div>
+        <div class="card"><div class="label">蒙特卡洛命中率</div><div id="result-prob" class="value">--</div><div class="sub">120 次确定性采样</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">控制</div>
+      <div class="buttons">
+        <button id="auto-aim" class="btn wide">自动求解 Pitch / Yaw</button>
+        <button id="launch" class="btn primary">发射动画</button>
+        <button id="pause" class="btn">暂停</button>
+        <button id="reset" class="btn wide">恢复规则预设</button>
+      </div>
+    </section>
+  </aside>
+
+  <main id="viewport">
+    <div id="loading">加载 Three.js 场景…</div>
+    <div id="status-pill">等待计算</div>
+    <div class="topbar"><h2>ROBOMASTER DART TRAJECTORY LAB</h2><p>左键旋转 · 右键平移 · 滚轮缩放</p></div>
+    <div class="camera-tools">
+      <button class="cam-btn" data-view="overview">全景</button>
+      <button class="cam-btn" data-view="launcher">镖架</button>
+      <button class="cam-btn" data-view="target">目标</button>
+      <button class="cam-btn" data-view="top">俯视</button>
+      <button id="toggle-pov" class="cam-btn">镖视角</button>
+    </div>
+    <div id="pov-panel">
+      <div class="pov-head"><span>飞镖第一视角 / DART POV</span><span><span class="pov-rec">REC</span> · <b id="pov-state">待发射</b></span></div>
+      <div id="pov-render"></div>
+      <div class="pov-vignette"></div>
+      <div class="pov-crosshair"><span></span></div>
+      <div class="pov-telemetry">
+        <div class="pov-data">飞行时间<b id="pov-time">0.000 s</b></div>
+        <div class="pov-data">实时速度<b id="pov-speed">0.00 m/s</b></div>
+        <div class="pov-data">剩余距离<b id="pov-remaining">-- m</b></div>
+        <div class="pov-data">播放进度<b id="pov-progress-text">0.0%</b></div>
+      </div>
+      <div class="pov-progress"><span id="pov-progress-bar"></span></div>
+    </div>
+    <div id="toast"></div>
+    <div class="hud">
+      <span><strong id="hud-model">基地检测模块</strong> · 绿色引导灯 520 nm · 发光直径约 55 mm</span>
+      <span><strong id="fps">-- FPS</strong> · RK4 二次阻力点质模型</span>
+    </div>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const DEG = Math.PI / 180;
+const G = 9.80665;
+const RHO = 1.225;
+const TRIGGER_DIAMETER = 0.055;
+const TARGET_TILT = 27.5 * DEG;
+const targetPresets = {
+  base: { name: '基地检测模块', outerW: 0.242, outerH: 0.239, height: 1.143 },
+  outpost: { name: '前哨站检测模块', outerW: 0.140, outerH: 0.141, height: 1.546 }
+};
+
+let fullResult = null;
+let idealResult = null;
+let animatedSamples = [];
+let animationRunning = false;
+let animationPaused = false;
+let animationClock = 0;
+let lastFrameTime = performance.now();
+let updateQueued = false;
+let flashTime = 0;
+let povEnabled = true;
+let povLastSample = null;
+let povImpactHold = 0;
+let currentParams = null;
+
+const viewport = $('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x071019);
+scene.fog = new THREE.FogExp2(0x071019, 0.018);
+
+const camera = new THREE.PerspectiveCamera(50, viewport.clientWidth / viewport.clientHeight, 0.02, 120);
+camera.position.set(10.5, 5.5, 9.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+viewport.appendChild(renderer.domElement);
+
+const povPanel = $('pov-panel');
+const povHost = $('pov-render');
+const povCamera = new THREE.PerspectiveCamera(68, 16 / 9, 0.008, 120);
+povCamera.up.set(0, 1, 0);
+const povRenderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+povRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+povRenderer.outputColorSpace = THREE.SRGBColorSpace;
+povRenderer.shadowMap.enabled = true;
+povRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+povHost.appendChild(povRenderer.domElement);
+
+function resizePovRenderer() {
+  const w = Math.max(1, povHost.clientWidth);
+  const h = Math.max(1, povHost.clientHeight);
+  povCamera.aspect = w / h;
+  povCamera.updateProjectionMatrix();
+  povRenderer.setSize(w, h, false);
+}
+
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(7, 1.0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.075;
+controls.maxPolarAngle = Math.PI / 2 - 0.015;
+controls.minDistance = 1.2;
+controls.maxDistance = 60;
+
+scene.add(new THREE.HemisphereLight(0x99cbe5, 0x15202a, 1.15));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+keyLight.position.set(4, 12, 7);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -25;
+keyLight.shadow.camera.right = 25;
+keyLight.shadow.camera.top = 20;
+keyLight.shadow.camera.bottom = -10;
+scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0x4fc3ff, 0.35);
+fillLight.position.set(-8, 4, -8);
+scene.add(fillLight);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 40),
+  new THREE.MeshStandardMaterial({ color: 0x0a151e, roughness: 0.94, metalness: 0.06 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+const grid = new THREE.GridHelper(80, 160, 0x29465a, 0x132635);
+grid.position.y = 0.002;
+scene.add(grid);
+
+const trajectoryGroup = new THREE.Group();
+const uncertaintyGroup = new THREE.Group();
+const markerGroup = new THREE.Group();
+const targetRoot = new THREE.Group();
+scene.add(trajectoryGroup, uncertaintyGroup, markerGroup, targetRoot);
+
+const material = {
+  dark: new THREE.MeshStandardMaterial({ color: 0x18232d, roughness: 0.55, metalness: 0.55 }),
+  black: new THREE.MeshStandardMaterial({ color: 0x080d12, roughness: 0.48, metalness: 0.45 }),
+  metal: new THREE.MeshStandardMaterial({ color: 0x6c7b86, roughness: 0.32, metalness: 0.8 }),
+  cyan: new THREE.MeshStandardMaterial({ color: 0x2bbbe4, emissive: 0x0b5d74, emissiveIntensity: 0.6, roughness: 0.35, metalness: 0.45 }),
+  red: new THREE.MeshStandardMaterial({ color: 0xd6424f, emissive: 0x5e1119, emissiveIntensity: 0.65, roughness: 0.35 }),
+  white: new THREE.MeshStandardMaterial({ color: 0xd8e0e4, roughness: 0.38, metalness: 0.15 }),
+  green: new THREE.MeshStandardMaterial({ color: 0x4dff72, emissive: 0x16ff48, emissiveIntensity: 2.4, roughness: 0.2 }),
+  station: new THREE.MeshStandardMaterial({ color: 0x26333d, transparent: true, opacity: 0.42, roughness: 0.6, metalness: 0.4, side: THREE.DoubleSide })
+};
+
+function box(w, h, d, mat, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+function cylinder(radius, length, mat, axis = 'y') {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 20), mat);
+  if (axis === 'x') m.rotation.z = Math.PI / 2;
+  if (axis === 'z') m.rotation.x = Math.PI / 2;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+function clearGroup(group) {
+  while (group.children.length) {
+    const child = group.children[0];
+    group.remove(child);
+    child.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material && !Object.values(material).includes(o.material)) {
+        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+        else o.material.dispose();
+      }
+    });
+  }
+}
+function beamBetween(a, b, radius = 0.018, mat = material.metal) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const length = dir.length();
+  const beam = cylinder(radius, length, mat, 'y');
+  beam.position.copy(a).add(b).multiplyScalar(0.5);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  return beam;
+}
+
+function createDartModel(accent = 0x438cff) {
+  const g = new THREE.Group();
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.55, roughness: 0.35, metalness: 0.25 });
+  const body = cylinder(0.018, 0.145, material.white, 'x');
+  body.position.x = -0.025;
+  g.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.027, 0.055, 24), material.dark);
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.x = 0.075;
+  nose.castShadow = true;
+  g.add(nose);
+  const trigger = box(0.022, 0.055, 0.055, material.black, 0.114, 0, 0);
+  g.add(trigger);
+  const led1 = box(0.024, 0.007, 0.038, accentMat, 0.126, 0.024, 0);
+  const led2 = box(0.024, 0.007, 0.038, accentMat, 0.126, -0.024, 0);
+  g.add(led1, led2);
+  const tail = cylinder(0.012, 0.045, material.metal, 'x');
+  tail.position.x = -0.12;
+  g.add(tail);
+  const finMat = new THREE.MeshStandardMaterial({ color: 0xe9f1f4, roughness: 0.42, metalness: 0.08, side: THREE.DoubleSide });
+  const finH = box(0.075, 0.005, 0.105, finMat, -0.095, 0, 0);
+  const finV = box(0.075, 0.105, 0.005, finMat, -0.095, 0, 0);
+  g.add(finH, finV);
+  return g;
+}
+
+function createLauncher() {
+  const root = new THREE.Group();
+  root.position.set(-0.42, 0, 0);
+  const base = box(0.95, 0.055, 0.55, material.dark, 0, 0.045, 0);
+  root.add(base);
+  [-0.42, 0.42].forEach((x) => [-0.23, 0.23].forEach((z) => root.add(box(0.11, 0.035, 0.08, material.black, x, 0.017, z))));
+  root.add(box(0.55, 0.04, 0.38, material.metal, -0.07, 0.095, 0));
+
+  const leftBase = new THREE.Vector3(-0.32, 0.12, -0.20);
+  const rightBase = new THREE.Vector3(-0.32, 0.12, 0.20);
+  const topL = new THREE.Vector3(-0.13, 0.62, -0.17);
+  const topR = new THREE.Vector3(-0.13, 0.62, 0.17);
+  root.add(beamBetween(leftBase, topL, 0.018), beamBetween(rightBase, topR, 0.018));
+  root.add(beamBetween(new THREE.Vector3(0.25, 0.12, -0.20), topL, 0.018), beamBetween(new THREE.Vector3(0.25, 0.12, 0.20), topR, 0.018));
+  root.add(beamBetween(topL, topR, 0.022));
+
+  const yaw = new THREE.Group();
+  yaw.position.set(-0.13, 0.57, 0);
+  root.add(yaw);
+  const yawMotor = cylinder(0.085, 0.08, material.black, 'y');
+  yawMotor.position.y = -0.02;
+  yaw.add(yawMotor);
+  const yawPlate = box(0.24, 0.035, 0.28, material.metal, 0, 0.055, 0);
+  yaw.add(yawPlate);
+
+  const pitch = new THREE.Group();
+  pitch.position.set(-0.12, 0.095, 0);
+  yaw.add(pitch);
+  const axle = cylinder(0.035, 0.34, material.cyan, 'z');
+  pitch.add(axle);
+  const rail1 = box(0.92, 0.032, 0.028, material.metal, 0.28, 0.04, -0.095);
+  const rail2 = box(0.92, 0.032, 0.028, material.metal, 0.28, 0.04, 0.095);
+  pitch.add(rail1, rail2);
+  pitch.add(box(0.85, 0.015, 0.16, material.dark, 0.25, 0.018, 0));
+  const wheel1 = cylinder(0.058, 0.035, material.red, 'z');
+  const wheel2 = cylinder(0.058, 0.035, material.red, 'z');
+  wheel1.position.set(0.20, 0.08, -0.035);
+  wheel2.position.set(0.20, 0.08, 0.035);
+  pitch.add(wheel1, wheel2);
+  pitch.add(box(0.18, 0.10, 0.23, material.black, -0.20, 0.08, 0));
+  pitch.add(box(0.12, 0.11, 0.12, material.cyan, -0.27, 0.10, 0));
+
+  const loaded = new THREE.Group();
+  pitch.add(loaded);
+  [-0.072, -0.024, 0.024, 0.072].forEach((z, i) => {
+    const d = createDartModel(i % 2 ? 0xff4b5b : 0x438cff);
+    d.scale.setScalar(0.78);
+    d.position.set(-0.02 - i * 0.006, 0.105, z);
+    loaded.add(d);
+  });
+
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0.75, 0.085, 0);
+  pitch.add(muzzle);
+
+  const envelopeMat = new THREE.LineBasicMaterial({ color: 0x45d7ff, transparent: true, opacity: 0.26 });
+  const envelope = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.0, 1.0, 0.6)), envelopeMat);
+  envelope.position.set(0, 0.5, 0);
+  root.add(envelope);
+
+  const station = new THREE.Group();
+  const panelL = box(0.62, 1.5, 0.06, material.station, -0.18, 0.72, -0.47);
+  const panelR = panelL.clone(); panelR.position.z = 0.47;
+  panelL.rotation.z = -0.23; panelR.rotation.z = -0.23;
+  station.add(panelL, panelR);
+  station.add(beamBetween(new THREE.Vector3(-0.48, 0.05, -0.46), new THREE.Vector3(-0.12, 1.42, -0.46), 0.025, material.dark));
+  station.add(beamBetween(new THREE.Vector3(-0.48, 0.05, 0.46), new THREE.Vector3(-0.12, 1.42, 0.46), 0.025, material.dark));
+  const gateMat = new THREE.MeshStandardMaterial({ color: 0x121a21, transparent: true, opacity: 0.55, roughness: 0.75, metalness: 0.25 });
+  const gate = box(0.055, 1.22, 0.82, gateMat, 0.58, 1.88, 0);
+  gate.rotation.z = -0.20;
+  station.add(gate);
+  root.add(station);
+
+  return { root, yaw, pitch, loaded, muzzle, envelope, station };
+}
+
+const launcher = createLauncher();
+scene.add(launcher.root);
+
+const animatedDartOuter = new THREE.Group();
+const animatedDartInner = createDartModel(0x438cff);
+animatedDartOuter.add(animatedDartInner);
+animatedDartOuter.visible = false;
+scene.add(animatedDartOuter);
+
+function createTarget(p) {
+  clearGroup(targetRoot);
+  const preset = targetPresets[p.targetType];
+  const tower = new THREE.Group();
+  const x = p.targetX;
+  if (p.targetType === 'base') {
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.72, 0.82, 6), material.dark);
+    lower.position.set(x + 0.18, 0.41, 0);
+    lower.rotation.y = Math.PI / 6;
+    lower.castShadow = lower.receiveShadow = true;
+    tower.add(lower);
+    tower.add(box(0.28, 0.62, 0.92, material.black, x + 0.25, 0.63, 0));
+    tower.add(box(0.16, 0.72, 0.65, material.metal, x + 0.32, 0.65, 0));
+  } else {
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.42, 0.65, 8), material.dark);
+    lower.position.set(x + 0.18, 0.325, 0);
+    lower.castShadow = lower.receiveShadow = true;
+    tower.add(lower);
+    tower.add(box(0.30, 0.92, 0.30, material.black, x + 0.18, 0.93, 0));
+    tower.add(box(0.16, 0.82, 0.18, material.metal, x + 0.12, 1.0, 0));
+  }
+
+  const module = new THREE.Group();
+  module.position.set(x, p.targetY, 0);
+  module.rotation.z = -TARGET_TILT;
+  const housing = box(0.07, preset.outerH, preset.outerW, material.black, 0, 0, 0);
+  module.add(housing);
+  const armor = box(0.012, p.windowH, p.windowW, material.dark, -0.041, 0.025, 0);
+  module.add(armor);
+  const armorEdgeMat = new THREE.LineBasicMaterial({ color: 0xff4857, transparent: true, opacity: 0.9 });
+  const armorEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(0.014, p.windowH, p.windowW)), armorEdgeMat);
+  armorEdge.position.set(-0.048, 0.025, 0);
+  module.add(armorEdge);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.0275, 24, 16), material.green);
+  lamp.scale.x = 0.55;
+  lamp.position.set(-0.045, -preset.outerH * 0.34, 0);
+  module.add(lamp);
+  const glow = new THREE.PointLight(0x49ff6d, 2.3, 2.4, 2);
+  glow.position.copy(lamp.position).add(new THREE.Vector3(-0.08, 0, 0));
+  module.add(glow);
+  const sensor = box(0.016, 0.03, 0.03, material.black, -0.047, -preset.outerH * 0.17, 0);
+  module.add(sensor);
+  tower.add(module);
+
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x45d7ff, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.175, 64), ringMat);
+  ring.rotation.y = Math.PI / 2;
+  ring.rotation.z = -TARGET_TILT;
+  ring.position.set(x - 0.07, p.targetY, 0);
+  tower.add(ring);
+  targetRoot.add(tower);
+}
+
+function readParams() {
+  const targetType = $('target-type').value;
+  const preset = targetPresets[targetType];
+  const p = {
+    targetType,
+    distance: +$('distance').value,
+    targetY: +$('target-height').value,
+    windowW: +$('window-width').value / 1000,
+    windowH: +$('window-height').value / 1000,
+    speed: +$('speed').value,
+    pitch: +$('pitch').value * DEG,
+    yaw: +$('yaw').value * DEG,
+    dispersion: +$('dispersion').value / 100,
+    mass: +$('mass').value / 1000,
+    dartLength: +$('dart-length').value / 1000,
+    wingspan: +$('wingspan').value / 1000,
+    cd: +$('cd').value,
+    eqDiameter: +$('eq-diameter').value / 1000,
+    windZ: +$('wind-z').value,
+    strictHit: $('strict-hit').checked,
+    preset
+  };
+  launcher.yaw.rotation.y = -p.yaw;
+  launcher.pitch.rotation.z = p.pitch;
+  launcher.envelope.visible = $('show-envelope').checked;
+  launcher.station.visible = $('show-station').checked;
+  launcher.loaded.scale.set(p.dartLength / 0.24, p.wingspan / 0.22, p.wingspan / 0.22);
+  scene.updateMatrixWorld(true);
+  const origin = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  launcher.muzzle.getWorldPosition(origin);
+  launcher.muzzle.getWorldQuaternion(q);
+  const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(q).normalize();
+  p.origin = origin;
+  p.direction = direction;
+  p.targetX = origin.x + p.distance;
+  return p;
+}
+
+function derivative(s, p, withDrag) {
+  const vx = s[3], vy = s[4], vz = s[5];
+  let ax = 0, ay = -G, az = 0;
+  if (withDrag) {
+    const rvx = vx;
+    const rvy = vy;
+    const rvz = vz - p.windZ;
+    const rel = Math.hypot(rvx, rvy, rvz);
+    const area = Math.PI * Math.pow(p.eqDiameter * 0.5, 2);
+    const k = 0.5 * RHO * p.cd * area / p.mass;
+    ax -= k * rel * rvx;
+    ay -= k * rel * rvy;
+    az -= k * rel * rvz;
+  }
+  return [vx, vy, vz, ax, ay, az];
+}
+
+function rk4Step(s, dt, p, withDrag) {
+  const k1 = derivative(s, p, withDrag);
+  const s2 = s.map((v, i) => v + k1[i] * dt * 0.5);
+  const k2 = derivative(s2, p, withDrag);
+  const s3 = s.map((v, i) => v + k2[i] * dt * 0.5);
+  const k3 = derivative(s3, p, withDrag);
+  const s4 = s.map((v, i) => v + k3[i] * dt);
+  const k4 = derivative(s4, p, withDrag);
+  return s.map((v, i) => v + dt * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6);
+}
+
+function targetFrame(p) {
+  const center = new THREE.Vector3(p.targetX, p.targetY, 0);
+  const u = new THREE.Vector3(0, 0, 1);
+  const v = new THREE.Vector3(Math.sin(TARGET_TILT), Math.cos(TARGET_TILT), 0);
+  const n = new THREE.Vector3(-Math.cos(TARGET_TILT), Math.sin(TARGET_TILT), 0);
+  return { center, u, v, n };
+}
+
+function segmentPlaneIntersection(a, b, frame) {
+  const da = frame.n.dot(new THREE.Vector3(a[0], a[1], a[2]).sub(frame.center));
+  const db = frame.n.dot(new THREE.Vector3(b[0], b[1], b[2]).sub(frame.center));
+  if (da === db || da * db > 0) return null;
+  const alpha = da / (da - db);
+  if (alpha < 0 || alpha > 1) return null;
+  const pos = new THREE.Vector3(
+    a[0] + (b[0] - a[0]) * alpha,
+    a[1] + (b[1] - a[1]) * alpha,
+    a[2] + (b[2] - a[2]) * alpha
+  );
+  const vel = new THREE.Vector3(
+    a[3] + (b[3] - a[3]) * alpha,
+    a[4] + (b[4] - a[4]) * alpha,
+    a[5] + (b[5] - a[5]) * alpha
+  );
+  return { alpha, pos, vel };
+}
+
+function simulate(p, withDrag = true, store = true, dt = 0.004) {
+  const v0 = p.direction.clone().multiplyScalar(p.speed);
+  let s = [p.origin.x, p.origin.y, p.origin.z, v0.x, v0.y, v0.z];
+  let prev = s.slice();
+  let t = 0;
+  let apex = s[1];
+  const frame = targetFrame(p);
+  const points = [];
+  const samples = [];
+  if (store) {
+    points.push(new THREE.Vector3(s[0], s[1], s[2]));
+    samples.push({ t, p: points[0].clone(), v: v0.clone() });
+  }
+  let impact = null;
+  for (let i = 0; i < 3000; i++) {
+    prev = s;
+    s = rk4Step(s, dt, p, withDrag);
+    t += dt;
+    apex = Math.max(apex, s[1]);
+    if (store && (i % 3 === 0)) {
+      const pos = new THREE.Vector3(s[0], s[1], s[2]);
+      points.push(pos);
+      samples.push({ t, p: pos.clone(), v: new THREE.Vector3(s[3], s[4], s[5]) });
+    }
+    const cross = segmentPlaneIntersection(prev, s, frame);
+    if (cross && cross.vel.dot(frame.n) < 0) {
+      const local = cross.pos.clone().sub(frame.center);
+      const lateral = local.dot(frame.u);
+      const vertical = local.dot(frame.v);
+      const triggerRadius = p.strictHit ? TRIGGER_DIAMETER / 2 : 0;
+      const halfW = Math.max(0, p.windowW / 2 - triggerRadius);
+      const halfH = Math.max(0, p.windowH / 2 - triggerRadius);
+      const hit = Math.abs(lateral) <= halfW && Math.abs(vertical) <= halfH;
+      impact = {
+        pos: cross.pos,
+        vel: cross.vel,
+        t: t - dt + dt * cross.alpha,
+        lateral,
+        vertical,
+        miss: Math.hypot(lateral, vertical),
+        hit,
+        halfW,
+        halfH
+      };
+      if (store) {
+        points.push(cross.pos.clone());
+        samples.push({ t: impact.t, p: cross.pos.clone(), v: cross.vel.clone() });
+      }
+      break;
+    }
+    if (s[1] < 0 && t > 0.1) break;
+    if (s[0] > p.targetX + 4 || t > 8) break;
+  }
+  return { points, samples, impact, apex };
+}
+
+function createLine(points, color, dashed = false, opacity = 1, radius = 0) {
+  if (points.length < 2) return null;
+  if (radius > 0) {
+    const step = Math.max(1, Math.floor(points.length / 180));
+    const reduced = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+    const curve = new THREE.CatmullRomCurve3(reduced);
+    const geo = new THREE.TubeGeometry(curve, Math.min(220, reduced.length * 2), radius, 6, false);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, depthWrite: false });
+    return new THREE.Mesh(geo, mat);
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = dashed
+    ? new THREE.LineDashedMaterial({ color, dashSize: 0.18, gapSize: 0.10, transparent: opacity < 1, opacity })
+    : new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+  const line = new THREE.Line(geo, mat);
+  if (dashed) line.computeLineDistances();
+  return line;
+}
+
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function normal(rand) {
+  const u = Math.max(rand(), 1e-9), v = Math.max(rand(), 1e-9);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function perturbed(p, rand) {
+  const q = { ...p };
+  const sigma = p.dispersion;
+  const pitch = p.pitch + normal(rand) * sigma * 2.2;
+  const yaw = p.yaw + normal(rand) * sigma * 2.2;
+  q.speed = p.speed * (1 + normal(rand) * sigma);
+  q.pitch = pitch;
+  q.yaw = yaw;
+  q.direction = new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)).normalize();
+  return q;
+}
+
+function renderPrediction(p) {
+  clearGroup(trajectoryGroup);
+  clearGroup(uncertaintyGroup);
+  clearGroup(markerGroup);
+  fullResult = simulate(p, true, true);
+  idealResult = simulate(p, false, true);
+
+  if ($('show-drag').checked && fullResult.points.length > 1) {
+    trajectoryGroup.add(createLine(fullResult.points, 0x45d7ff, false, 0.95, 0.018));
+  }
+  if ($('show-ideal').checked && idealResult.points.length > 1) {
+    trajectoryGroup.add(createLine(idealResult.points, 0xffad42, true, 0.9, 0));
+  }
+
+  const frame = targetFrame(p);
+  if (fullResult.impact) {
+    const sphereMat = new THREE.MeshBasicMaterial({ color: fullResult.impact.hit ? 0x5cff84 : 0xff5a68 });
+    const point = new THREE.Mesh(new THREE.SphereGeometry(0.045, 18, 12), sphereMat);
+    point.position.copy(fullResult.impact.pos);
+    markerGroup.add(point);
+    const center = frame.center;
+    const missLine = createLine([center, fullResult.impact.pos], fullResult.impact.hit ? 0x5cff84 : 0xff5a68, false, 0.8, 0);
+    markerGroup.add(missLine);
+  }
+
+  let hits = 0;
+  const rand = mulberry32(20260717);
+  const cloudPoints = [];
+  for (let i = 0; i < 120; i++) {
+    const q = perturbed(p, rand);
+    const r = simulate(q, true, i < 14, 0.005);
+    if (r.impact?.hit) hits++;
+    if (i < 14 && r.points.length > 1 && $('show-cloud').checked) {
+      uncertaintyGroup.add(createLine(r.points, 0x6d8ea2, false, 0.18, 0));
+    }
+    if (r.impact) cloudPoints.push({ pos: r.impact.pos, hit: r.impact.hit });
+  }
+  if ($('show-cloud').checked) {
+    cloudPoints.slice(0, 60).forEach((cp) => {
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.012, 8, 6),
+        new THREE.MeshBasicMaterial({ color: cp.hit ? 0x5cff84 : 0xff6976, transparent: true, opacity: 0.48 })
+      );
+      dot.position.copy(cp.pos).add(frame.n.clone().multiplyScalar(-0.012));
+      uncertaintyGroup.add(dot);
+    });
+  }
+  uncertaintyGroup.visible = $('show-cloud').checked;
+  updateResults(p, hits / 120);
+  animatedSamples = fullResult.samples;
+}
+
+function updateResults(p, probability) {
+  const imp = fullResult.impact;
+  const card = $('hit-card');
+  card.classList.remove('hit', 'miss');
+  const pill = $('status-pill');
+  pill.classList.remove('hit', 'miss');
+  if (!imp) {
+    $('result-hit').textContent = '未到达';
+    $('result-miss').textContent = '--';
+    $('result-time').textContent = '--';
+    $('result-terminal').textContent = '--';
+    $('result-apex').textContent = fullResult.apex.toFixed(3) + ' m';
+    $('result-prob').textContent = '0.0%';
+    $('result-window').textContent = '轨迹提前落地或越界';
+    pill.textContent = '轨迹未穿过检测面';
+    pill.classList.add('miss');
+    return;
+  }
+  const hitText = imp.hit ? '命中' : '未命中';
+  $('result-hit').textContent = hitText;
+  $('result-miss').textContent = (imp.miss * 1000).toFixed(1) + ' mm';
+  $('result-time').textContent = imp.t.toFixed(3) + ' s';
+  $('result-terminal').textContent = imp.vel.length().toFixed(2);
+  $('result-apex').textContent = fullResult.apex.toFixed(3) + ' m';
+  $('result-prob').textContent = (probability * 100).toFixed(1) + '%';
+  $('result-window').textContent = p.strictHit
+    ? `有效窗 ${(imp.halfW * 2 * 1000).toFixed(0)}×${(imp.halfH * 2 * 1000).toFixed(0)} mm`
+    : `几何窗 ${(p.windowW * 1000).toFixed(0)}×${(p.windowH * 1000).toFixed(0)} mm`;
+  card.classList.add(imp.hit ? 'hit' : 'miss');
+  pill.textContent = `${hitText} · 横向 ${(imp.lateral * 1000).toFixed(1)} mm · 纵向 ${(imp.vertical * 1000).toFixed(1)} mm`;
+  pill.classList.add(imp.hit ? 'hit' : 'miss');
+}
+
+function updateLabels() {
+  const format = {
+    distance: (v) => (+v).toFixed(1),
+    'target-height': (v) => (+v).toFixed(3),
+    'window-width': (v) => (+v).toFixed(0),
+    'window-height': (v) => (+v).toFixed(0),
+    speed: (v) => (+v).toFixed(1), pitch: (v) => (+v).toFixed(1), yaw: (v) => (+v).toFixed(1),
+    dispersion: (v) => (+v).toFixed(2), mass: (v) => (+v).toFixed(0),
+    'dart-length': (v) => (+v).toFixed(0), wingspan: (v) => (+v).toFixed(0),
+    cd: (v) => (+v).toFixed(2), 'eq-diameter': (v) => (+v).toFixed(0), 'wind-z': (v) => (+v).toFixed(1)
+  };
+  Object.keys(format).forEach((id) => { $('val-' + id).textContent = format[id]($(id).value); });
+  $('speed-warning').style.display = +$('speed').value > 25 ? 'block' : 'none';
+}
+
+function updateAll() {
+  updateLabels();
+  const p = readParams();
+  currentParams = p;
+  createTarget(p);
+  renderPrediction(p);
+  $('hud-model').textContent = targetPresets[p.targetType].name;
+  animatedDartInner.scale.set(p.dartLength / 0.24, p.wingspan / 0.22, p.wingspan / 0.22);
+  setPovIdle(p);
+}
+function scheduleUpdate() {
+  if (updateQueued) return;
+  updateQueued = true;
+  requestAnimationFrame(() => { updateQueued = false; updateAll(); });
+}
+
+function showToast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.style.opacity = 1;
+  setTimeout(() => t.style.opacity = 0, 1400);
+}
+
+function aimDirection(pitch, yaw) {
+  return new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)).normalize();
+}
+function solveAim() {
+  const base = readParams();
+  let best = { score: Infinity, pitch: base.pitch, yaw: base.yaw };
+  const stages = [
+    { pitchStep: 1.0, yawStep: 1.0, pRange: [25, 45], yRange: [-15, 15] },
+    { pitchStep: 0.2, yawStep: 0.2, pRange: null, yRange: null },
+    { pitchStep: 0.05, yawStep: 0.05, pRange: null, yRange: null }
+  ];
+  for (let si = 0; si < stages.length; si++) {
+    const st = stages[si];
+    const pMin = st.pRange ? st.pRange[0] : Math.max(25, best.pitch / DEG - st.pitchStep * 5);
+    const pMax = st.pRange ? st.pRange[1] : Math.min(45, best.pitch / DEG + st.pitchStep * 5);
+    const yMin = st.yRange ? st.yRange[0] : Math.max(-15, best.yaw / DEG - st.yawStep * 5);
+    const yMax = st.yRange ? st.yRange[1] : Math.min(15, best.yaw / DEG + st.yawStep * 5);
+    let stageBest = best;
+    for (let pd = pMin; pd <= pMax + 1e-9; pd += st.pitchStep) {
+      for (let yd = yMin; yd <= yMax + 1e-9; yd += st.yawStep) {
+        const q = { ...base, pitch: pd * DEG, yaw: yd * DEG };
+        q.direction = aimDirection(q.pitch, q.yaw);
+        const r = simulate(q, true, false, 0.006);
+        if (!r.impact) continue;
+        const score = r.impact.miss;
+        if (score < stageBest.score) stageBest = { score, pitch: q.pitch, yaw: q.yaw };
+      }
+    }
+    best = stageBest;
+  }
+  $('pitch').value = (best.pitch / DEG).toFixed(2);
+  $('yaw').value = (best.yaw / DEG).toFixed(2);
+  updateAll();
+  showToast(`求解完成：Pitch ${(best.pitch / DEG).toFixed(2)}°，Yaw ${(best.yaw / DEG).toFixed(2)}°`);
+}
+
+function sampleAtTime(samples, t) {
+  if (!samples.length) return null;
+  if (t <= samples[0].t) return samples[0];
+  if (t >= samples[samples.length - 1].t) return samples[samples.length - 1];
+  let lo = 0, hi = samples.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid].t < t) lo = mid; else hi = mid;
+  }
+  const a = samples[lo], b = samples[hi];
+  const k = (t - a.t) / Math.max(1e-9, b.t - a.t);
+  return { t, p: a.p.clone().lerp(b.p, k), v: a.v.clone().lerp(b.v, k) };
+}
+function setPovVisible(enabled) {
+  povEnabled = enabled;
+  povPanel.classList.toggle('hidden', !enabled);
+  $('show-pov').checked = enabled;
+  $('toggle-pov').textContent = enabled ? '隐藏' : '镖视角';
+  if (enabled) requestAnimationFrame(resizePovRenderer);
+}
+
+function setPovCameraFromSample(s, p) {
+  if (!s) return;
+  const dir = s.v.clone().normalize();
+  const speed = s.v.length();
+  // Camera sits just in front of the trigger/nose, so the dart itself never clips into the image.
+  const cameraPos = s.p.clone().addScaledVector(dir, Math.max(0.11, p.dartLength * 0.54));
+  cameraPos.y += 0.012;
+  const target = cameraPos.clone().addScaledVector(dir, 12);
+  povCamera.position.copy(cameraPos);
+  povCamera.up.set(0, 1, 0);
+  povCamera.lookAt(target);
+
+  const endT = animatedSamples[animatedSamples.length - 1]?.t || 0;
+  const progress = endT > 0 ? THREE.MathUtils.clamp(s.t / endT, 0, 1) : 0;
+  const remaining = Math.max(0, p.targetX - s.p.x);
+  $('pov-time').textContent = `${s.t.toFixed(3)} s`;
+  $('pov-speed').textContent = `${speed.toFixed(2)} m/s`;
+  $('pov-remaining').textContent = `${remaining.toFixed(2)} m`;
+  $('pov-progress-text').textContent = `${(progress * 100).toFixed(1)}%`;
+  $('pov-progress-bar').style.width = `${progress * 100}%`;
+}
+
+function setPovIdle(p) {
+  if (animationRunning || povImpactHold > 0) return;
+  const dir = p.direction.clone().normalize();
+  const pos = p.origin.clone().addScaledVector(dir, Math.max(0.11, p.dartLength * 0.54));
+  pos.y += 0.012;
+  povCamera.position.copy(pos);
+  povCamera.up.set(0, 1, 0);
+  povCamera.lookAt(pos.clone().addScaledVector(dir, 12));
+  $('pov-state').textContent = '待发射';
+  $('pov-time').textContent = '0.000 s';
+  $('pov-speed').textContent = `${p.speed.toFixed(2)} m/s`;
+  $('pov-remaining').textContent = `${p.distance.toFixed(2)} m`;
+  $('pov-progress-text').textContent = '0.0%';
+  $('pov-progress-bar').style.width = '0%';
+  povPanel.classList.remove('flying');
+}
+
+function renderPov() {
+  if (!povEnabled) return;
+  // The prediction overlays are useful in the observer view but would obscure a first-person recording.
+  const saved = {
+    trajectory: trajectoryGroup.visible,
+    uncertainty: uncertaintyGroup.visible,
+    markers: markerGroup.visible,
+    dart: animatedDartOuter.visible,
+    envelope: launcher.envelope.visible
+  };
+  trajectoryGroup.visible = false;
+  uncertaintyGroup.visible = false;
+  markerGroup.visible = false;
+  animatedDartOuter.visible = false;
+  launcher.envelope.visible = false;
+  povRenderer.render(scene, povCamera);
+  trajectoryGroup.visible = saved.trajectory;
+  uncertaintyGroup.visible = saved.uncertainty;
+  markerGroup.visible = saved.markers;
+  animatedDartOuter.visible = saved.dart;
+  launcher.envelope.visible = saved.envelope;
+}
+
+function startLaunch() {
+  if (!animatedSamples.length || !fullResult?.impact) {
+    showToast('当前轨迹没有到达目标检测面');
+    return;
+  }
+  animationClock = 0;
+  animationRunning = true;
+  animationPaused = false;
+  povImpactHold = 0;
+  animatedDartOuter.visible = true;
+  $('pause').textContent = '暂停';
+  launcher.loaded.children[0].visible = false;
+  flashTime = 0;
+  $('pov-state').textContent = '飞行中';
+  povPanel.classList.add('flying');
+  if ($('show-pov').checked) setPovVisible(true);
+}
+
+function setCamera(view) {
+  const p = readParams();
+  if (view === 'launcher') { camera.position.set(2.1, 1.65, 2.3); controls.target.set(0, 0.65, 0); }
+  if (view === 'target') { camera.position.set(p.targetX - 2.2, p.targetY + 1.1, 2.2); controls.target.set(p.targetX, p.targetY, 0); }
+  if (view === 'top') { camera.position.set(p.targetX * 0.5, 20, 0.01); controls.target.set(p.targetX * 0.5, 0, 0); }
+  if (view === 'overview') { camera.position.set(p.targetX * 0.48, 5.4, 8.6); controls.target.set(p.targetX * 0.5, 1.0, 0); }
+  controls.update();
+}
+
+const sliderIds = ['distance','target-height','window-width','window-height','speed','pitch','yaw','dispersion','mass','dart-length','wingspan','cd','eq-diameter','wind-z'];
+sliderIds.forEach((id) => $(id).addEventListener('input', scheduleUpdate));
+['show-drag','show-ideal','show-cloud','show-envelope','show-station','strict-hit'].forEach((id) => $(id).addEventListener('change', scheduleUpdate));
+$('show-pov').addEventListener('change', () => setPovVisible($('show-pov').checked));
+$('toggle-pov').addEventListener('click', () => setPovVisible(!povEnabled));
+$('target-type').addEventListener('change', () => {
+  const preset = targetPresets[$('target-type').value];
+  $('target-height').value = preset.height;
+  updateAll();
+});
+$('auto-aim').addEventListener('click', solveAim);
+$('launch').addEventListener('click', startLaunch);
+$('pause').addEventListener('click', () => {
+  if (!animationRunning) return;
+  animationPaused = !animationPaused;
+  $('pause').textContent = animationPaused ? '继续' : '暂停';
+  $('pov-state').textContent = animationPaused ? '已暂停' : '飞行中';
+  povPanel.classList.toggle('flying', !animationPaused);
+});
+$('reset').addEventListener('click', () => {
+  const defaults = {
+    'target-type': 'base', distance: 15.0, 'target-height': 1.143, 'window-width': 140, 'window-height': 125,
+    speed: 14.0, pitch: 25.0, yaw: 0.0, dispersion: 0.35, mass: 320,
+    'dart-length': 240, wingspan: 220, cd: 0.28, 'eq-diameter': 55, 'wind-z': 0.0
+  };
+  Object.entries(defaults).forEach(([id, val]) => $(id).value = val);
+  ['show-drag','show-ideal','show-cloud','show-envelope','show-station','strict-hit','show-pov'].forEach((id) => $(id).checked = true);
+  animationRunning = false; animationPaused = false; povImpactHold = 0;
+  setPovVisible(true);
+  updateAll();
+  setCamera('overview');
+});
+document.querySelectorAll('.cam-btn').forEach((b) => b.addEventListener('click', () => setCamera(b.dataset.view)));
+
+window.addEventListener('resize', () => {
+  camera.aspect = viewport.clientWidth / viewport.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+  resizePovRenderer();
+});
+
+let fpsFrames = 0, fpsLast = performance.now();
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+  controls.update();
+
+  if (animationRunning && !animationPaused) {
+    animationClock += dt * 0.72;
+    const s = sampleAtTime(animatedSamples, animationClock);
+    if (s) {
+      animatedDartOuter.position.copy(s.p);
+      const dir = s.v.clone().normalize();
+      animatedDartOuter.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+      animatedDartInner.rotation.x += dt * 11;
+      povLastSample = s;
+      setPovCameraFromSample(s, currentParams || readParams());
+    }
+    const endT = animatedSamples[animatedSamples.length - 1]?.t ?? 0;
+    if (animationClock >= endT) {
+      animationRunning = false;
+      flashTime = 0.45;
+      povImpactHold = 1.25;
+      $('pov-state').textContent = fullResult?.impact?.hit ? '命中' : '未命中';
+      povPanel.classList.remove('flying');
+      launcher.loaded.children[0].visible = true;
+      setTimeout(() => animatedDartOuter.visible = false, 380);
+    }
+  } else if (povImpactHold > 0) {
+    povImpactHold = Math.max(0, povImpactHold - dt);
+    if (povImpactHold === 0) setPovIdle(currentParams || readParams());
+  }
+  if (flashTime > 0) {
+    flashTime -= dt;
+    material.green.emissiveIntensity = 3.2 + Math.sin(flashTime * 45) * 1.5;
+  } else material.green.emissiveIntensity = 2.4;
+
+  renderer.render(scene, camera);
+  renderPov();
+  fpsFrames++;
+  if (now - fpsLast >= 1000) {
+    $('fps').textContent = `${fpsFrames} FPS`;
+    fpsFrames = 0;
+    fpsLast = now;
+  }
+}
+
+try {
+  updateAll();
+  setCamera('overview');
+  setPovVisible(true);
+  resizePovRenderer();
+  $('loading').style.display = 'none';
+  requestAnimationFrame(animate);
+} catch (err) {
+  $('loading').textContent = '场景初始化失败：' + err.message;
+  console.error(err);
+}
+</script>
+</body>
+</html>
