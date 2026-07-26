@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IFC → STL 转换器</title>
+<style>
+  :root {
+    --ink: #131a22;          /* 制图板深蓝黑 */
+    --panel: #1c2530;
+    --panel-2: #212c39;
+    --line: #2e3b49;
+    --text: #e8edf2;
+    --text-dim: #8fa0b0;
+    --accent: #f5b32f;       /* 工地安全黄 */
+    --accent-ink: #201705;
+    --ok: #6fcf8e;
+    --err: #e5695e;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    background: var(--ink);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; font-weight: 700; letter-spacing: .02em; }
+  header .pipeline {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  header .pipeline b { color: var(--accent); font-weight: 600; }
+
+  .layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 0;
+  }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  }
+
+  .side {
+    border-right: 1px solid var(--line);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  @media (max-width: 820px) { .side { border-right: none; border-bottom: 1px solid var(--line); } }
+
+  /* 图签式拖放区 */
+  .dropzone {
+    border: 1.5px dashed var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 26px 18px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    outline: none;
+  }
+  .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); }
+  .dropzone.dragover { border-color: var(--accent); background: var(--panel-2); }
+  .dropzone .big { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .dropzone .hint { font-size: 12px; color: var(--text-dim); }
+  .dropzone .ext {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-top: 10px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field > label { font-size: 12px; color: var(--text-dim); letter-spacing: .04em; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    flex: 1;
+    font: 600 13px var(--sans);
+    color: var(--text-dim);
+    background: var(--panel);
+    border: none;
+    padding: 8px 0;
+    cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .field .note { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+
+  .ghost {
+    font: 600 12.5px var(--sans);
+    color: var(--text-dim);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 0;
+    cursor: pointer;
+  }
+  .ghost:hover { color: var(--text); border-color: var(--accent); }
+  .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .stats {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .stats .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+  }
+  .stats .row + .row { border-top: 1px solid var(--line); }
+  .stats .k { color: var(--text-dim); }
+  .stats .v { color: var(--text); }
+
+  .status {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    min-height: 20px;
+    word-break: break-all;
+  }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .status .spin {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: -1px;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .status .spin { animation: none; } }
+
+  .btn {
+    font: 700 14px var(--sans);
+    border: none;
+    border-radius: 6px;
+    padding: 12px 0;
+    cursor: pointer;
+    background: var(--accent);
+    color: var(--accent-ink);
+    letter-spacing: .02em;
+  }
+  .btn:disabled { background: var(--panel-2); color: var(--text-dim); cursor: not-allowed; }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  .viewer {
+    position: relative;
+    min-height: 320px;
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
+      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
+      var(--ink);
+    background-blend-mode: soft-light, soft-light, normal;
+  }
+  .viewer canvas { display: block; }
+  .viewer .empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  .viewer .tag {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <h1>IFC → STL 转换器</h1>
+  <div class="pipeline">IFC ▸ 解析 ▸ 三角网格 ▸ <b>STL</b></div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入 IFC 文件">
+      <div class="big">拖入 IFC 文件</div>
+      <div class="hint">或点击此处选择文件,解析全部在本机浏览器内完成</div>
+      <span class="ext">.ifc</span>
+      <input type="file" id="fileInput" accept=".ifc" hidden>
+    </div>
+
+    <div class="field">
+      <label>输出格式</label>
+      <div class="seg" role="group" aria-label="STL 输出格式">
+        <button type="button" id="fmtBin" class="active">二进制 STL</button>
+        <button type="button" id="fmtAsc">ASCII STL</button>
+      </div>
+      <div class="note">二进制体积小、速度快,推荐使用;ASCII 为纯文本,便于查看,但文件大很多,大模型不建议。</div>
+    </div>
+
+    <div class="field">
+      <label>预览上方向</label>
+      <div class="seg" role="group" aria-label="预览上方向">
+        <button type="button" id="upZ" class="active">Z 轴朝上</button>
+        <button type="button" id="upY">Y 轴朝上</button>
+      </div>
+      <button type="button" class="ghost" id="resetView">复位视角</button>
+      <div class="note">IFC 通常以 Z 轴为竖直方向。模型若看起来立着或躺倒,切换此项即可。这里只转相机,不动几何体,导出的 STL 坐标不受影响。</div>
+    </div>
+
+    <div class="stats" id="stats" aria-live="polite">
+      <div class="row"><span class="k">文件</span><span class="v" id="stFile">—</span></div>
+      <div class="row"><span class="k">构件网格</span><span class="v" id="stMesh">—</span></div>
+      <div class="row"><span class="k">三角形</span><span class="v" id="stTri">—</span></div>
+      <div class="row"><span class="k">顶点</span><span class="v" id="stVert">—</span></div>
+      <div class="row"><span class="k">STL 预计大小</span><span class="v" id="stSize">—</span></div>
+    </div>
+
+    <div class="status" id="status" aria-live="polite">等待文件…</div>
+
+    <button class="btn" id="downloadBtn" disabled>下载 STL</button>
+  </aside>
+
+  <main class="viewer" id="viewer">
+    <div class="empty" id="viewerEmpty">[ 3D 预览 ]</div>
+    <div class="tag">拖动旋转 · 滚轮缩放 · 右键平移</div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ========== 常量与状态 ========== */
+const WEB_IFC_CDN = 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/';
+
+let ifcAPI = null;          // web-ifc 实例(懒加载)
+let chunks = [];            // 提取出的几何块 [{pos, nor, idx, color}]
+let totalTris = 0;
+let totalVerts = 0;
+let baseName = 'model';
+let format = 'binary';      // 'binary' | 'ascii'
+let upAxis = 'z';           // 'z' | 'y' —— 只影响预览相机,不改几何体
+
+/* ========== DOM ========== */
+const $ = id => document.getElementById(id);
+const dropzone = $('dropzone');
+const fileInput = $('fileInput');
+const statusEl = $('status');
+const downloadBtn = $('downloadBtn');
+const fmtBin = $('fmtBin'), fmtAsc = $('fmtAsc');
+const upZBtn = $('upZ'), upYBtn = $('upY'), resetViewBtn = $('resetView');
+
+function setStatus(msg, cls = '', busy = false) {
+  statusEl.className = 'status ' + cls;
+  statusEl.innerHTML = (busy ? '<span class="spin"></span>' : '') + msg;
+}
+function setStat(id, v) { $(id).textContent = v; }
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+const nextFrame = () => new Promise(r => setTimeout(r, 30)); // 让 UI 先绘制
+
+/* ========== 加载 web-ifc 引擎 ========== */
+async function ensureEngine() {
+  if (ifcAPI) return;
+  setStatus('正在加载 web-ifc 引擎(首次需要联网)…', '', true);
+  let WebIFC;
+  try {
+    WebIFC = await import(WEB_IFC_CDN + 'web-ifc-api.js');
+  } catch (e) {
+    // 回退:IIFE 版本,挂载到 window.WebIFC
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = WEB_IFC_CDN + 'web-ifc-api-iife.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('无法从 CDN 加载 web-ifc,请检查网络。'));
+      document.head.appendChild(s);
+    });
+    WebIFC = window.WebIFC;
+  }
+  const api = new WebIFC.IfcAPI();
+  api.SetWasmPath(WEB_IFC_CDN, true);
+  await api.Init();
+  ifcAPI = api;
+}
+
+/* ========== IFC 解析:提取全部三角几何 ========== */
+function extractAllGeometry(modelID) {
+  const out = [];
+  let tris = 0, verts = 0;
+
+  ifcAPI.StreamAllMeshes(modelID, flatMesh => {
+    const n = flatMesh.geometries.size();
+    for (let i = 0; i < n; i++) {
+      const placed = flatMesh.geometries.get(i);
+      const geom = ifcAPI.GetGeometry(modelID, placed.geometryExpressID);
+      const vRaw = ifcAPI.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize()); // 每顶点 6 个 float: x,y,z,nx,ny,nz
+      const iRaw = ifcAPI.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
+      const m = placed.flatTransformation; // 4x4 列主序矩阵
+
+      const nv = vRaw.length / 6;
+      const pos = new Float32Array(nv * 3);
+      const nor = new Float32Array(nv * 3);
+      for (let v = 0; v < nv; v++) {
+        const x = vRaw[v * 6], y = vRaw[v * 6 + 1], z = vRaw[v * 6 + 2];
+        const nx = vRaw[v * 6 + 3], ny = vRaw[v * 6 + 4], nz = vRaw[v * 6 + 5];
+        pos[v * 3]     = m[0] * x + m[4] * y + m[8]  * z + m[12];
+        pos[v * 3 + 1] = m[1] * x + m[5] * y + m[9]  * z + m[13];
+        pos[v * 3 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+        nor[v * 3]     = m[0] * nx + m[4] * ny + m[8]  * nz;
+        nor[v * 3 + 1] = m[1] * nx + m[5] * ny + m[9]  * nz;
+        nor[v * 3 + 2] = m[2] * nx + m[6] * ny + m[10] * nz;
+      }
+      const idx = new Uint32Array(iRaw); // 拷贝出 wasm 内存
+      out.push({ pos, nor, idx, color: placed.color });
+      tris += idx.length / 3;
+      verts += nv;
+      geom.delete();
+    }
+  });
+
+  return { chunks: out, totalTris: tris, totalVerts: verts };
+}
+
+/* ========== STL 导出 ========== */
+function exportBinarySTL() {
+  const buf = new ArrayBuffer(84 + totalTris * 50);
+  const dv = new DataView(buf);
+  const header = 'Binary STL converted from IFC (web-ifc)';
+  for (let i = 0; i < Math.min(80, header.length); i++) dv.setUint8(i, header.charCodeAt(i));
+  dv.setUint32(80, totalTris, true);
+
+  let off = 84;
+  for (const c of chunks) {
+    const { pos, idx } = c;
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t] * 3, b = idx[t + 1] * 3, d = idx[t + 2] * 3;
+      const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+      const bx = pos[b], by = pos[b + 1], bz = pos[b + 2];
+      const cx = pos[d], cy = pos[d + 1], cz = pos[d + 2];
+      // 面法线 = (B-A) × (C-A)
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+
+      dv.setFloat32(off, nx, true); dv.setFloat32(off + 4, ny, true); dv.setFloat32(off + 8, nz, true);
+      dv.setFloat32(off + 12, ax, true); dv.setFloat32(off + 16, ay, true); dv.setFloat32(off + 20, az, true);
+      dv.setFloat32(off + 24, bx, true); dv.setFloat32(off + 28, by, true); dv.setFloat32(off + 32, bz, true);
+      dv.setFloat32(off + 36, cx, true); dv.setFloat32(off + 40, cy, true); dv.setFloat32(off + 44, cz, true);
+      dv.setUint16(off + 48, 0, true);
+      off += 50;
+    }
+  }
+  return new Blob([buf], { type: 'application/octet-stream' });
+}
+
+function exportAsciiSTL() {
+  const parts = ['solid ' + baseName + '\n'];
+  const f = x => x.toExponential(6);
+  for (const c of chunks) {
+    const { pos, idx } = c;
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t] * 3, b = idx[t + 1] * 3, d = idx[t + 2] * 3;
+      const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+      const bx = pos[b], by = pos[b + 1], bz = pos[b + 2];
+      const cx = pos[d], cy = pos[d + 1], cz = pos[d + 2];
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      parts.push(
+        'facet normal ' + f(nx) + ' ' + f(ny) + ' ' + f(nz) + '\n outer loop\n' +
+        '  vertex ' + f(ax) + ' ' + f(ay) + ' ' + f(az) + '\n' +
+        '  vertex ' + f(bx) + ' ' + f(by) + ' ' + f(bz) + '\n' +
+        '  vertex ' + f(cx) + ' ' + f(cy) + ' ' + f(cz) + '\n' +
+        ' endloop\nendfacet\n'
+      );
+    }
+  }
+  parts.push('endsolid ' + baseName + '\n');
+  return new Blob(parts, { type: 'text/plain' });
+}
+
+/* ========== 3D 预览 ========== */
+const viewer = $('viewer');
+let renderer, scene, camera, controls, modelGroup, gridHelper, hemiLight, dirLight;
+let modelBox = null;   // 当前模型包围盒,用于取景和切换上方向
+
+/* 创建 / 重建 OrbitControls。
+   three.js 的 OrbitControls 只在构造时根据 camera.up 计算一次内部旋转基准四元数,
+   之后就算再改 camera.up,拖拽旋转也不会跟着变 —— 这正是切换"上方向"后
+   鼠标转起来很怪的原因。所以每次 camera.up 改变后都重新构造一次控件。
+   同时限制极角,避免拖到顶/底时视角整个翻过去,转动手感会更稳定。 */
+function buildControls(prevTarget) {
+  if (controls) controls.dispose();
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.9;
+  controls.minPolarAngle = 0.001;
+  controls.maxPolarAngle = Math.PI - 0.001;
+  if (prevTarget) controls.target.copy(prevTarget);
+  controls.update();
+}
+
+function initViewer() {
+  if (renderer) return;
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  viewer.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
+  camera.up.set(0, 0, 1);              // 与 IFC 一致:Z 轴朝上
+  camera.position.set(12, -12, 9);
+
+  buildControls();
+
+  hemiLight = new THREE.HemisphereLight(0xdfe8f5, 0x2a2f36, 1.1);
+  hemiLight.position.set(0, 0, 1);
+  scene.add(hemiLight);
+
+  dirLight = new THREE.DirectionalLight(0xffffff, 1.6);
+  dirLight.position.set(1, -1.5, 2.5);
+  scene.add(dirLight);
+
+  const resize = () => {
+    const w = viewer.clientWidth, h = viewer.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(viewer);
+  resize();
+
+  renderer.setAnimationLoop(() => {
+    controls.update();
+    renderer.render(scene, camera);
+  });
+}
+
+/* 按当前 upAxis 摆正灯光、地面网格和相机;reframe 为真时重置机位 */
+function applyUpAxis(reframe) {
+  if (!renderer) return;
+
+  const prevTarget = controls.target.clone();
+
+  if (upAxis === 'z') {
+    camera.up.set(0, 0, 1);
+    hemiLight.position.set(0, 0, 1);
+    dirLight.position.set(1, -1.5, 2.5);
+  } else {
+    camera.up.set(0, 1, 0);
+    hemiLight.position.set(0, 1, 0);
+    dirLight.position.set(1, 2, 1.5);
+  }
+
+  // camera.up 变了,重建控件让拖拽旋转的基准跟着更新
+  buildControls(prevTarget);
+
+  if (!modelBox) { controls.update(); return; }
+
+  const center = modelBox.getCenter(new THREE.Vector3());
+  const size = modelBox.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z, 1);
+
+  // 地面网格跟着上方向翻转
+  if (gridHelper) { scene.remove(gridHelper); gridHelper.dispose(); }
+  gridHelper = new THREE.GridHelper(radius * 3, 30, 0x39506b, 0x243547);
+  if (upAxis === 'z') {
+    gridHelper.rotation.x = Math.PI / 2;                        // 网格躺进 XY 平面
+    gridHelper.position.set(center.x, center.y, modelBox.min.z);
+  } else {
+    gridHelper.position.set(center.x, modelBox.min.y, center.z);
+  }
+  scene.add(gridHelper);
+
+  camera.near = radius / 100;
+  camera.far = radius * 20;
+  if (reframe) {
+    if (upAxis === 'z') {
+      camera.position.set(center.x + radius * 1.1, center.y - radius * 1.1, center.z + radius * 0.8);
+    } else {
+      camera.position.set(center.x + radius * 1.1, center.y + radius * 0.8, center.z + radius * 1.1);
+    }
+  }
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}
+
+function showPreview() {
+  initViewer();
+  $('viewerEmpty').style.display = 'none';
+
+  // 清理旧模型
+  if (modelGroup) {
+    modelGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    scene.remove(modelGroup);
+  }
+
+  // 合并为一个非索引网格(带顶点色)
+  const count = totalTris * 3;
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  const col = new Float32Array(count * 3);
+  let p = 0;
+  for (const c of chunks) {
+    const r = c.color ? c.color.x : 0.72;
+    const g = c.color ? c.color.y : 0.74;
+    const b = c.color ? c.color.z : 0.76;
+    for (let t = 0; t < c.idx.length; t++) {
+      const vi = c.idx[t] * 3;
+      pos[p] = c.pos[vi]; pos[p + 1] = c.pos[vi + 1]; pos[p + 2] = c.pos[vi + 2];
+      nor[p] = c.nor[vi]; nor[p + 1] = c.nor[vi + 1]; nor[p + 2] = c.nor[vi + 2];
+      col[p] = r; col[p + 1] = g; col[p + 2] = b;
+      p += 3;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, side: THREE.DoubleSide, metalness: 0, roughness: 0.9
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // 模型不做任何旋转:保持 IFC 原始坐标,屏幕上看到的即导出 STL 里的坐标,
+  // 竖直方向交给相机的 up 向量处理。
+  modelGroup = new THREE.Group();
+  modelGroup.add(mesh);
+  scene.add(modelGroup);
+
+  modelBox = new THREE.Box3().setFromObject(modelGroup);
+  applyUpAxis(true);
+}
+
+/* ========== 主流程 ========== */
+async function handleFile(file) {
+  if (!file) return;
+  if (!/\.ifc$/i.test(file.name)) {
+    setStatus('仅支持 .ifc 文件。', 'err');
+    return;
+  }
+  baseName = file.name.replace(/\.ifc$/i, '');
+  downloadBtn.disabled = true;
+  chunks = []; totalTris = 0; totalVerts = 0;
+  setStat('stFile', file.name.length > 22 ? file.name.slice(0, 20) + '…' : file.name);
+  setStat('stMesh', '—'); setStat('stTri', '—'); setStat('stVert', '—'); setStat('stSize', '—');
+
+  try {
+    await ensureEngine();
+
+    setStatus('正在读取文件(' + fmtBytes(file.size) + ')…', '', true);
+    await nextFrame();
+    const buffer = new Uint8Array(await file.arrayBuffer());
+
+    setStatus('正在解析 IFC 并生成三角网格,较大模型请耐心等待…', '', true);
+    await nextFrame();
+    const modelID = ifcAPI.OpenModel(buffer);
+    const result = extractAllGeometry(modelID);
+    ifcAPI.CloseModel(modelID);
+
+    chunks = result.chunks;
+    totalTris = result.totalTris;
+    totalVerts = result.totalVerts;
+
+    if (totalTris === 0) {
+      setStatus('解析完成,但未提取到任何几何体。请确认该 IFC 含有三维构件。', 'err');
+      return;
+    }
+
+    setStat('stMesh', chunks.length.toLocaleString());
+    setStat('stTri', totalTris.toLocaleString());
+    setStat('stVert', totalVerts.toLocaleString());
+    setStat('stSize', fmtBytes(84 + totalTris * 50) + '(二进制)');
+
+    setStatus('正在生成预览…', '', true);
+    await nextFrame();
+    showPreview();
+
+    downloadBtn.disabled = false;
+    setStatus('转换完成,可下载 STL。坐标单位与 IFC 模型一致(通常为米),Z 轴朝上。', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus('转换失败:' + (e && e.message ? e.message : e), 'err');
+  }
+}
+
+downloadBtn.addEventListener('click', async () => {
+  if (!chunks.length) return;
+  setStatus('正在生成 ' + (format === 'binary' ? '二进制' : 'ASCII') + ' STL…', '', true);
+  await nextFrame();
+  try {
+    const blob = format === 'binary' ? exportBinarySTL() : exportAsciiSTL();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = baseName + '.stl';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setStatus('已导出 ' + a.download + '(' + fmtBytes(blob.size) + ')。', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus('导出失败:' + (e && e.message ? e.message : e) +
+      (format === 'ascii' ? ' — 模型较大时请改用二进制格式。' : ''), 'err');
+  }
+});
+
+/* ========== 交互:格式 / 上方向 / 拖放 / 选择 ========== */
+function setFormat(f) {
+  format = f;
+  fmtBin.classList.toggle('active', f === 'binary');
+  fmtAsc.classList.toggle('active', f === 'ascii');
+}
+fmtBin.addEventListener('click', () => setFormat('binary'));
+fmtAsc.addEventListener('click', () => setFormat('ascii'));
+
+function setUpAxis(axis) {
+  if (upAxis === axis) return;
+  upAxis = axis;
+  upZBtn.classList.toggle('active', axis === 'z');
+  upYBtn.classList.toggle('active', axis === 'y');
+  applyUpAxis(true);
+}
+upZBtn.addEventListener('click', () => setUpAxis('z'));
+upYBtn.addEventListener('click', () => setUpAxis('y'));
+resetViewBtn.addEventListener('click', () => applyUpAxis(true));
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+
+['dragenter', 'dragover'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
+dropzone.addEventListener('drop', e => {
+  e.stopPropagation(); // 避免 window 的 drop 处理器重复触发
+  handleFile(e.dataTransfer.files[0]);
+});
+
+// 整页也接受拖放
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
