@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IFC → STL / PCD 转换器</title>
+<style>
+  :root {
+    --ink: #131a22;          /* 制图板深蓝黑 */
+    --panel: #1c2530;
+    --panel-2: #212c39;
+    --line: #2e3b49;
+    --text: #e8edf2;
+    --text-dim: #8fa0b0;
+    --accent: #f5b32f;       /* 工地安全黄 */
+    --accent-ink: #201705;
+    --ok: #6fcf8e;
+    --err: #e5695e;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    background: var(--ink);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; font-weight: 700; letter-spacing: .02em; }
+  header .pipeline {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  header .pipeline b { color: var(--accent); font-weight: 600; }
+
+  .layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 0;
+  }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  }
+
+  .side {
+    border-right: 1px solid var(--line);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  @media (max-width: 820px) { .side { border-right: none; border-bottom: 1px solid var(--line); } }
+
+  /* 图签式拖放区 */
+  .dropzone {
+    border: 1.5px dashed var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 26px 18px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    outline: none;
+  }
+  .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); }
+  .dropzone.dragover { border-color: var(--accent); background: var(--panel-2); }
+  .dropzone .big { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .dropzone .hint { font-size: 12px; color: var(--text-dim); }
+  .dropzone .ext {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-top: 10px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field > label { font-size: 12px; color: var(--text-dim); letter-spacing: .04em; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    flex: 1;
+    font: 600 13px var(--sans);
+    color: var(--text-dim);
+    background: var(--panel);
+    border: none;
+    padding: 8px 0;
+    cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: var(--accent); color: var(--accent-ink); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .field .note { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+  .hidden { display: none !important; }
+  .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .param-grid.three { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 420px) { .param-grid.three { grid-template-columns: 1fr; } }
+  .param { display: flex; flex-direction: column; gap: 5px; }
+  .param span { font-size: 11.5px; color: var(--text-dim); }
+  .param input[type="number"] {
+    width: 100%;
+    font: 12.5px var(--mono);
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 9px;
+    outline: none;
+  }
+  .param input[type="number"]:focus { border-color: var(--accent); }
+  .checkline { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+  .checkline input { accent-color: var(--accent); }
+
+  .ghost {
+    font: 600 12.5px var(--sans);
+    color: var(--text-dim);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 0;
+    cursor: pointer;
+  }
+  .ghost:hover { color: var(--text); border-color: var(--accent); }
+  .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .stats {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .stats .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+  }
+  .stats .row + .row { border-top: 1px solid var(--line); }
+  .stats .k { color: var(--text-dim); }
+  .stats .v { color: var(--text); }
+
+  .status {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    min-height: 20px;
+    word-break: break-all;
+  }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .status .spin {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: -1px;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .status .spin { animation: none; } }
+
+  .btn {
+    font: 700 14px var(--sans);
+    border: none;
+    border-radius: 6px;
+    padding: 12px 0;
+    cursor: pointer;
+    background: var(--accent);
+    color: var(--accent-ink);
+    letter-spacing: .02em;
+  }
+  .btn:disabled { background: var(--panel-2); color: var(--text-dim); cursor: not-allowed; }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  .viewer {
+    position: relative;
+    min-height: 320px;
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
+      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
+      var(--ink);
+    background-blend-mode: soft-light, soft-light, normal;
+  }
+  .viewer canvas { display: block; }
+  .viewer .empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  .viewer .tag {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <h1>IFC → STL / PCD 转换器</h1>
+  <div class="pipeline">IFC ▸ 解析 ▸ 三角网格 ▸ <b id="pipelineOut">STL</b></div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入 IFC 文件">
+      <div class="big">拖入 IFC 文件</div>
+      <div class="hint">或点击此处选择文件，解析与点云采样均在本机浏览器内完成</div>
+      <span class="ext">.ifc</span>
+      <input type="file" id="fileInput" accept=".ifc" hidden>
+    </div>
+
+    <div class="field">
+      <label>目标文件</label>
+      <div class="seg" role="group" aria-label="目标文件类型">
+        <button type="button" id="outStl" class="active">IFC → STL</button>
+        <button type="button" id="outPcd">IFC → PCD</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label id="formatLabel">STL 编码</label>
+      <div class="seg" role="group" aria-label="输出编码">
+        <button type="button" id="fmtBin" class="active">二进制 STL</button>
+        <button type="button" id="fmtAsc">ASCII STL</button>
+      </div>
+      <div class="note" id="formatNote">二进制体积小、速度快，推荐使用；ASCII 为纯文本，大模型不建议。</div>
+    </div>
+
+    <div class="field hidden" id="pcdOptions">
+      <label>PCD 表面采样</label>
+      <div class="param-grid" style="grid-template-columns: 1fr;">
+        <label class="param">
+          <span>点间距（模型单位）</span>
+          <input id="pointSpacing" type="number" value="0.05" min="0.000001" step="0.01">
+        </label>
+      </div>
+      <label class="checkline"><input id="pcdAttrs" type="checkbox" checked>导出法线与构件颜色（XYZ + Normal + RGB）</label>
+
+      <label>PCD 导出旋转（度）</label>
+      <div class="param-grid three">
+        <label class="param">
+          <span>绕 X 轴</span>
+          <input id="rotX" type="number" value="0" step="1">
+        </label>
+        <label class="param">
+          <span>绕 Y 轴</span>
+          <input id="rotY" type="number" value="0" step="1">
+        </label>
+        <label class="param">
+          <span>绕 Z 轴</span>
+          <input id="rotZ" type="number" value="0" step="1">
+        </label>
+      </div>
+      <div class="seg" role="group" aria-label="PCD 旋转中心">
+        <button type="button" id="pivotCenter" class="active">绕模型中心</button>
+        <button type="button" id="pivotOrigin">绕坐标原点</button>
+      </div>
+      <button type="button" class="ghost" id="resetRotation">旋转角度归零</button>
+      <div class="note">旋转会写入导出的 PCD 坐标，并同步旋转法线；按 X → Y → Z 顺序执行。模型中心模式可避免点云因旋转产生明显平移。</div>
+
+      <button type="button" class="ghost" id="generatePcdBtn" disabled>生成 / 刷新点云预览</button>
+      <div class="note">在每个三角面内按固定点间距生成规则行列点阵，不使用随机数。导出点数不设人为上限；点间距越小，文件越大，最终规模仅受浏览器可用内存限制。</div>
+    </div>
+
+    <div class="field">
+      <label>预览上方向</label>
+      <div class="seg" role="group" aria-label="预览上方向">
+        <button type="button" id="upZ" class="active">Z 轴朝上</button>
+        <button type="button" id="upY">Y 轴朝上</button>
+      </div>
+      <button type="button" class="ghost" id="resetView">复位视角</button>
+      <div class="note">这里只调整预览相机。STL 保留 IFC 原始坐标；PCD 的实际坐标旋转由上方“PCD 导出旋转”控制。</div>
+    </div>
+
+    <div class="stats" id="stats" aria-live="polite">
+      <div class="row"><span class="k">文件</span><span class="v" id="stFile">—</span></div>
+      <div class="row"><span class="k">构件网格</span><span class="v" id="stMesh">—</span></div>
+      <div class="row"><span class="k">三角形</span><span class="v" id="stTri">—</span></div>
+      <div class="row"><span class="k">网格顶点</span><span class="v" id="stVert">—</span></div>
+      <div class="row"><span class="k">表面积</span><span class="v" id="stArea">—</span></div>
+      <div class="row" id="pointRow"><span class="k">PCD 点数</span><span class="v" id="stPoint">—</span></div>
+      <div class="row"><span class="k" id="stSizeLabel">STL 预计大小</span><span class="v" id="stSize">—</span></div>
+    </div>
+
+    <div class="status" id="status" aria-live="polite">等待文件…</div>
+
+    <button class="btn" id="downloadBtn" disabled>下载 STL</button>
+  </aside>
+
+  <main class="viewer" id="viewer">
+    <div class="empty" id="viewerEmpty">[ 3D 预览 ]</div>
+    <div class="tag" id="viewerTag">拖动视角 · 滚轮缩放 · 右键平移</div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ========== 常量与状态 ========== */
+const WEB_IFC_CDN = 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/';
+
+let ifcAPI = null;          // web-ifc 实例(懒加载)
+let chunks = [];            // 提取出的几何块 [{pos, nor, idx, color}]
+let totalTris = 0;
+let totalVerts = 0;
+let totalSurfaceArea = 0;
+let pointCloud = null;       // {positions, normals, colors, count, key}
+let baseName = 'model';
+let outputType = 'stl';      // 'stl' | 'pcd'
+let format = 'binary';       // 'binary' | 'ascii'
+let upAxis = 'z';            // 只影响预览相机，不改导出坐标
+let sourceBounds = null;      // IFC 原始几何包围盒，用于绕模型中心旋转
+let rotationPivot = 'center'; // 'center' | 'origin'
+
+/* ========== DOM ========== */
+const $ = id => document.getElementById(id);
+const dropzone = $('dropzone');
+const fileInput = $('fileInput');
+const statusEl = $('status');
+const downloadBtn = $('downloadBtn');
+const outStl = $('outStl'), outPcd = $('outPcd');
+const fmtBin = $('fmtBin'), fmtAsc = $('fmtAsc');
+const pcdOptions = $('pcdOptions');
+const pointSpacingInput = $('pointSpacing');
+const pcdAttrsInput = $('pcdAttrs'), generatePcdBtn = $('generatePcdBtn');
+const rotXInput = $('rotX'), rotYInput = $('rotY'), rotZInput = $('rotZ');
+const pivotCenterBtn = $('pivotCenter'), pivotOriginBtn = $('pivotOrigin'), resetRotationBtn = $('resetRotation');
+const upZBtn = $('upZ'), upYBtn = $('upY'), resetViewBtn = $('resetView');
+const viewerTag = $('viewerTag');
+
+function setStatus(msg, cls = '', busy = false) {
+  statusEl.className = 'status ' + cls;
+  statusEl.innerHTML = (busy ? '<span class="spin"></span>' : '') + msg;
+}
+function setStat(id, v) { $(id).textContent = v; }
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+const nextFrame = () => new Promise(r => setTimeout(r, 30)); // 让 UI 先绘制
+
+/* ========== 加载 web-ifc 引擎 ========== */
+async function ensureEngine() {
+  if (ifcAPI) return;
+  setStatus('正在加载 web-ifc 引擎(首次需要联网)…', '', true);
+  let WebIFC;
+  try {
+    WebIFC = await import(WEB_IFC_CDN + 'web-ifc-api.js');
+  } catch (e) {
+    // 回退:IIFE 版本,挂载到 window.WebIFC
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = WEB_IFC_CDN + 'web-ifc-api-iife.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('无法从 CDN 加载 web-ifc,请检查网络。'));
+      document.head.appendChild(s);
+    });
+    WebIFC = window.WebIFC;
+  }
+  const api = new WebIFC.IfcAPI();
+  api.SetWasmPath(WEB_IFC_CDN, true);
+  await api.Init();
+  ifcAPI = api;
+}
+
+/* ========== IFC 解析:提取全部三角几何 ========== */
+function extractAllGeometry(modelID) {
+  const out = [];
+  let tris = 0, verts = 0, surfaceArea = 0;
+
+  ifcAPI.StreamAllMeshes(modelID, flatMesh => {
+    const n = flatMesh.geometries.size();
+    for (let i = 0; i < n; i++) {
+      const placed = flatMesh.geometries.get(i);
+      const geom = ifcAPI.GetGeometry(modelID, placed.geometryExpressID);
+      const vRaw = ifcAPI.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize()); // 每顶点 6 个 float: x,y,z,nx,ny,nz
+      const iRaw = ifcAPI.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
+      const m = placed.flatTransformation; // 4x4 列主序矩阵
+
+      const nv = vRaw.length / 6;
+      const pos = new Float32Array(nv * 3);
+      const nor = new Float32Array(nv * 3);
+      for (let v = 0; v < nv; v++) {
+        const x = vRaw[v * 6], y = vRaw[v * 6 + 1], z = vRaw[v * 6 + 2];
+        const nx = vRaw[v * 6 + 3], ny = vRaw[v * 6 + 4], nz = vRaw[v * 6 + 5];
+        pos[v * 3]     = m[0] * x + m[4] * y + m[8]  * z + m[12];
+        pos[v * 3 + 1] = m[1] * x + m[5] * y + m[9]  * z + m[13];
+        pos[v * 3 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+        nor[v * 3]     = m[0] * nx + m[4] * ny + m[8]  * nz;
+        nor[v * 3 + 1] = m[1] * nx + m[5] * ny + m[9]  * nz;
+        nor[v * 3 + 2] = m[2] * nx + m[6] * ny + m[10] * nz;
+      }
+      const idx = new Uint32Array(iRaw); // 拷贝出 wasm 内存
+      for (let t = 0; t < idx.length; t += 3) {
+        const a = idx[t] * 3, b = idx[t + 1] * 3, d = idx[t + 2] * 3;
+        const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+        const vx = pos[d] - pos[a], vy = pos[d + 1] - pos[a + 1], vz = pos[d + 2] - pos[a + 2];
+        const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+        surfaceArea += 0.5 * Math.hypot(cx, cy, cz);
+      }
+      out.push({ pos, nor, idx, color: placed.color });
+      tris += idx.length / 3;
+      verts += nv;
+      geom.delete();
+    }
+  });
+
+  return { chunks: out, totalTris: tris, totalVerts: verts, totalSurfaceArea: surfaceArea };
+}
+
+/* ========== STL 导出 ========== */
+function exportBinarySTL() {
+  const buf = new ArrayBuffer(84 + totalTris * 50);
+  const dv = new DataView(buf);
+  const header = 'Binary STL converted from IFC (web-ifc)';
+  for (let i = 0; i < Math.min(80, header.length); i++) dv.setUint8(i, header.charCodeAt(i));
+  dv.setUint32(80, totalTris, true);
+
+  let off = 84;
+  for (const c of chunks) {
+    const { pos, idx } = c;
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t] * 3, b = idx[t + 1] * 3, d = idx[t + 2] * 3;
+      const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+      const bx = pos[b], by = pos[b + 1], bz = pos[b + 2];
+      const cx = pos[d], cy = pos[d + 1], cz = pos[d + 2];
+      // 面法线 = (B-A) × (C-A)
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+
+      dv.setFloat32(off, nx, true); dv.setFloat32(off + 4, ny, true); dv.setFloat32(off + 8, nz, true);
+      dv.setFloat32(off + 12, ax, true); dv.setFloat32(off + 16, ay, true); dv.setFloat32(off + 20, az, true);
+      dv.setFloat32(off + 24, bx, true); dv.setFloat32(off + 28, by, true); dv.setFloat32(off + 32, bz, true);
+      dv.setFloat32(off + 36, cx, true); dv.setFloat32(off + 40, cy, true); dv.setFloat32(off + 44, cz, true);
+      dv.setUint16(off + 48, 0, true);
+      off += 50;
+    }
+  }
+  return new Blob([buf], { type: 'application/octet-stream' });
+}
+
+function exportAsciiSTL() {
+  const parts = ['solid ' + baseName + '\n'];
+  const f = x => x.toExponential(6);
+  for (const c of chunks) {
+    const { pos, idx } = c;
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t] * 3, b = idx[t + 1] * 3, d = idx[t + 2] * 3;
+      const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+      const bx = pos[b], by = pos[b + 1], bz = pos[b + 2];
+      const cx = pos[d], cy = pos[d + 1], cz = pos[d + 2];
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      parts.push(
+        'facet normal ' + f(nx) + ' ' + f(ny) + ' ' + f(nz) + '\n outer loop\n' +
+        '  vertex ' + f(ax) + ' ' + f(ay) + ' ' + f(az) + '\n' +
+        '  vertex ' + f(bx) + ' ' + f(by) + ' ' + f(bz) + '\n' +
+        '  vertex ' + f(cx) + ' ' + f(cy) + ' ' + f(cz) + '\n' +
+        ' endloop\nendfacet\n'
+      );
+    }
+  }
+  parts.push('endsolid ' + baseName + '\n');
+  return new Blob(parts, { type: 'text/plain' });
+}
+
+
+/* ========== PCD 表面采样与导出 ========== */
+function readPcdSettings() {
+  const spacing = Number(pointSpacingInput.value);
+  if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('点间距必须大于 0。');
+  return { spacing, withAttrs: pcdAttrsInput.checked };
+}
+
+function estimatePcdPointCount() {
+  if (!totalSurfaceArea) return 0;
+  const { spacing } = readPcdSettings();
+  // 规则点阵的实际点数还包含三角面边界点；这里仅用于生成前的文件大小预估。
+  return Math.max(1, Math.ceil(totalSurfaceArea / (spacing * spacing) + totalTris * 2));
+}
+
+function pcdSettingsKey() {
+  const s = readPcdSettings();
+  return [s.spacing, s.withAttrs ? 1 : 0, totalSurfaceArea, totalTris].join('|');
+}
+
+/* PCD 旋转：点云采样保持 IFC 原始坐标，导出和预览阶段再应用刚体旋转。
+   依次绕固定 X、Y、Z 轴旋转，列向量形式为 R = Rz * Ry * Rx。 */
+function readRotationSettings() {
+  const xDeg = Number(rotXInput.value);
+  const yDeg = Number(rotYInput.value);
+  const zDeg = Number(rotZInput.value);
+  if (![xDeg, yDeg, zDeg].every(Number.isFinite)) throw new Error('X、Y、Z 旋转角必须是有效数字。');
+  return { xDeg, yDeg, zDeg, pivot: rotationPivot };
+}
+
+function computeSourceBounds() {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const c of chunks) {
+    for (let i = 0; i < c.pos.length; i += 3) {
+      const x = c.pos[i], y = c.pos[i + 1], z = c.pos[i + 2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return {
+    minX, minY, minZ, maxX, maxY, maxZ,
+    centerX: (minX + maxX) * 0.5,
+    centerY: (minY + maxY) * 0.5,
+    centerZ: (minZ + maxZ) * 0.5
+  };
+}
+
+function buildPcdTransform() {
+  const { xDeg, yDeg, zDeg, pivot } = readRotationSettings();
+  const k = Math.PI / 180;
+  const rx = xDeg * k, ry = yDeg * k, rz = zDeg * k;
+  const sx = Math.sin(rx), cx = Math.cos(rx);
+  const sy = Math.sin(ry), cy = Math.cos(ry);
+  const sz = Math.sin(rz), cz = Math.cos(rz);
+
+  // Rz * Ry * Rx：对点依次执行 X → Y → Z 旋转。
+  const m00 = cz * cy;
+  const m01 = cz * sy * sx - sz * cx;
+  const m02 = cz * sy * cx + sz * sx;
+  const m10 = sz * cy;
+  const m11 = sz * sy * sx + cz * cx;
+  const m12 = sz * sy * cx - cz * sx;
+  const m20 = -sy;
+  const m21 = cy * sx;
+  const m22 = cy * cx;
+
+  let px = 0, py = 0, pz = 0;
+  if (pivot === 'center' && sourceBounds) {
+    px = sourceBounds.centerX; py = sourceBounds.centerY; pz = sourceBounds.centerZ;
+  }
+
+  // p' = R(p - pivot) + pivot = Rp + t
+  const tx = px - (m00 * px + m01 * py + m02 * pz);
+  const ty = py - (m10 * px + m11 * py + m12 * pz);
+  const tz = pz - (m20 * px + m21 * py + m22 * pz);
+  return { m00, m01, m02, m10, m11, m12, m20, m21, m22, tx, ty, tz, xDeg, yDeg, zDeg, pivot };
+}
+
+function rotationSummary(tr = buildPcdTransform()) {
+  const pivotText = tr.pivot === 'center' ? '模型中心' : '坐标原点';
+  return `X ${tr.xDeg}° · Y ${tr.yDeg}° · Z ${tr.zDeg}° · ${pivotText}`;
+}
+
+function triangleArea(pos, a, b, d) {
+  const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+  const vx = pos[d] - pos[a], vy = pos[d + 1] - pos[a + 1], vz = pos[d + 2] - pos[a + 2];
+  return 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+}
+
+/*
+  为三角面建立确定性的局部规则网格：
+  1. 选择最长边作为每一行的基边；
+  2. 沿三角形高度按 spacing 分行；
+  3. 每行再沿平行于最长边的方向按 spacing 分点。
+
+  所有采样位置都由网格尺寸和点间距唯一确定，不调用 Math.random，
+  因此同一 IFC 与同一参数每次得到完全一致的 PCD。
+*/
+function buildRegularTrianglePlan(c, a, b, d, spacing) {
+  const pos = c.pos;
+  const abx = pos[b] - pos[a], aby = pos[b + 1] - pos[a + 1], abz = pos[b + 2] - pos[a + 2];
+  const bdx = pos[d] - pos[b], bdy = pos[d + 1] - pos[b + 1], bdz = pos[d + 2] - pos[b + 2];
+  const dax = pos[a] - pos[d], day = pos[a + 1] - pos[d + 1], daz = pos[a + 2] - pos[d + 2];
+  const ab2 = abx * abx + aby * aby + abz * abz;
+  const bd2 = bdx * bdx + bdy * bdy + bdz * bdz;
+  const da2 = dax * dax + day * day + daz * daz;
+
+  let u, v, w;
+  if (ab2 >= bd2 && ab2 >= da2) { u = a; v = b; w = d; }
+  else if (bd2 >= da2) { u = b; v = d; w = a; }
+  else { u = d; v = a; w = b; }
+
+  const ex = pos[v] - pos[u], ey = pos[v + 1] - pos[u + 1], ez = pos[v + 2] - pos[u + 2];
+  const wx = pos[w] - pos[u], wy = pos[w + 1] - pos[u + 1], wz = pos[w + 2] - pos[u + 2];
+  const baseLength = Math.hypot(ex, ey, ez);
+  if (baseLength <= 1e-15) return null;
+
+  const cx = ey * wz - ez * wy;
+  const cy = ez * wx - ex * wz;
+  const cz = ex * wy - ey * wx;
+  const doubleArea = Math.hypot(cx, cy, cz);
+  if (doubleArea <= 1e-18) return null;
+
+  const height = doubleArea / baseLength;
+  const rows = Math.max(1, Math.ceil(height / spacing));
+  return { u, v, w, baseLength, height, rows };
+}
+
+function regularTrianglePointCount(plan, spacing) {
+  let count = 0;
+  for (let row = 0; row <= plan.rows; row++) {
+    const t = row / plan.rows;
+    const width = (1 - t) * plan.baseLength;
+    const columns = width <= 1e-15 ? 0 : Math.max(1, Math.ceil(width / spacing));
+    count += columns + 1;
+  }
+  return count;
+}
+
+function writeRegularPoint(c, plan, row, column, columns, pointIndex, positions, normals, colors) {
+  const t = row / plan.rows;
+  const alpha = columns === 0 ? 0 : column / columns;
+
+  // 当前行连接 U-W 与 V-W 两条边，alpha 表示该行上的等距位置。
+  const wu = (1 - t) * (1 - alpha);
+  const wv = (1 - t) * alpha;
+  const ww = t;
+  const u = plan.u, v = plan.v, w = plan.w;
+  const o = pointIndex * 3;
+
+  positions[o] = wu * c.pos[u] + wv * c.pos[v] + ww * c.pos[w];
+  positions[o + 1] = wu * c.pos[u + 1] + wv * c.pos[v + 1] + ww * c.pos[w + 1];
+  positions[o + 2] = wu * c.pos[u + 2] + wv * c.pos[v + 2] + ww * c.pos[w + 2];
+
+  let nx = wu * c.nor[u] + wv * c.nor[v] + ww * c.nor[w];
+  let ny = wu * c.nor[u + 1] + wv * c.nor[v + 1] + ww * c.nor[w + 1];
+  let nz = wu * c.nor[u + 2] + wv * c.nor[v + 2] + ww * c.nor[w + 2];
+  const nlen = Math.hypot(nx, ny, nz) || 1;
+  normals[o] = nx / nlen;
+  normals[o + 1] = ny / nlen;
+  normals[o + 2] = nz / nlen;
+
+  colors[o] = Math.round(255 * Math.min(1, Math.max(0, c.color ? c.color.x : 0.72)));
+  colors[o + 1] = Math.round(255 * Math.min(1, Math.max(0, c.color ? c.color.y : 0.74)));
+  colors[o + 2] = Math.round(255 * Math.min(1, Math.max(0, c.color ? c.color.z : 0.76)));
+}
+
+async function generatePointCloud(force = false) {
+  if (!chunks.length) throw new Error('请先加载 IFC 文件。');
+  const key = pcdSettingsKey();
+  if (!force && pointCloud && pointCloud.key === key) return pointCloud;
+
+  const { spacing } = readPcdSettings();
+  let target = 0;
+  let processed = 0;
+  let validTriangles = 0;
+
+  // 第一遍：精确计算规则点阵所需点数，不设置人为最大点数。
+  for (const c of chunks) {
+    for (let t = 0; t < c.idx.length; t += 3) {
+      const a = c.idx[t] * 3, b = c.idx[t + 1] * 3, d = c.idx[t + 2] * 3;
+      const plan = buildRegularTrianglePlan(c, a, b, d, spacing);
+      if (plan) {
+        target += regularTrianglePointCount(plan, spacing);
+        validTriangles++;
+        if (!Number.isSafeInteger(target)) throw new Error('点数超过 JavaScript 可安全表示范围，请增大点间距。');
+      }
+      processed++;
+      if (processed % 12000 === 0) {
+        setStatus('正在计算规则点阵：' + Math.min(100, Math.round(processed / totalTris * 100)) + '%…', '', true);
+        await nextFrame();
+      }
+    }
+  }
+
+  if (!validTriangles || target <= 0) throw new Error('模型三角形面积为 0，无法进行表面采样。');
+
+  let positions, normals, colors;
+  try {
+    positions = new Float32Array(target * 3);
+    normals = new Float32Array(target * 3);
+    colors = new Uint8Array(target * 3);
+  } catch (e) {
+    throw new Error('规则点云需要 ' + target.toLocaleString() + ' 点，浏览器内存不足。请增大点间距后重试。');
+  }
+
+  // 第二遍：按规则行列顺序写入全部点，不随机抽取、不截断。
+  let written = 0;
+  processed = 0;
+  for (const c of chunks) {
+    for (let t = 0; t < c.idx.length; t += 3) {
+      const a = c.idx[t] * 3, b = c.idx[t + 1] * 3, d = c.idx[t + 2] * 3;
+      const plan = buildRegularTrianglePlan(c, a, b, d, spacing);
+      if (plan) {
+        for (let row = 0; row <= plan.rows; row++) {
+          const rowRatio = row / plan.rows;
+          const width = (1 - rowRatio) * plan.baseLength;
+          const columns = width <= 1e-15 ? 0 : Math.max(1, Math.ceil(width / spacing));
+          for (let column = 0; column <= columns; column++) {
+            writeRegularPoint(c, plan, row, column, columns, written, positions, normals, colors);
+            written++;
+          }
+        }
+      }
+      processed++;
+      if (processed % 6000 === 0) {
+        setStatus(
+          '正在生成规则 PCD：' + Math.min(100, Math.round(processed / totalTris * 100)) +
+          '% · 已写入 ' + written.toLocaleString() + ' 点…', '', true
+        );
+        await nextFrame();
+      }
+    }
+  }
+
+  pointCloud = { positions, normals, colors, count: written, key };
+  setStat('stPoint', written.toLocaleString());
+  updateSizeEstimate();
+  return pointCloud;
+}
+
+function pcdHeader(count, binary, withAttrs) {
+  const fields = withAttrs ? 'x y z normal_x normal_y normal_z rgb' : 'x y z';
+  const sizes = withAttrs ? '4 4 4 4 4 4 4' : '4 4 4';
+  const types = withAttrs ? 'F F F F F F F' : 'F F F';
+  const counts = withAttrs ? '1 1 1 1 1 1 1' : '1 1 1';
+  return '# .PCD v0.7 - Point Cloud Data file format\n' +
+    'VERSION 0.7\n' +
+    'FIELDS ' + fields + '\n' +
+    'SIZE ' + sizes + '\n' +
+    'TYPE ' + types + '\n' +
+    'COUNT ' + counts + '\n' +
+    'WIDTH ' + count + '\n' +
+    'HEIGHT 1\n' +
+    'VIEWPOINT 0 0 0 1 0 0 0\n' +
+    'POINTS ' + count + '\n' +
+    'DATA ' + (binary ? 'binary' : 'ascii') + '\n';
+}
+
+function exportBinaryPCD(cloud) {
+  const withAttrs = pcdAttrsInput.checked;
+  const tr = buildPcdTransform();
+  const stride = withAttrs ? 28 : 12;
+  const body = new ArrayBuffer(cloud.count * stride);
+  const dv = new DataView(body);
+  let off = 0;
+  for (let i = 0; i < cloud.count; i++) {
+    const p = i * 3;
+    const x = cloud.positions[p], y = cloud.positions[p + 1], z = cloud.positions[p + 2];
+    const ox = tr.m00 * x + tr.m01 * y + tr.m02 * z + tr.tx;
+    const oy = tr.m10 * x + tr.m11 * y + tr.m12 * z + tr.ty;
+    const oz = tr.m20 * x + tr.m21 * y + tr.m22 * z + tr.tz;
+    dv.setFloat32(off, ox, true);
+    dv.setFloat32(off + 4, oy, true);
+    dv.setFloat32(off + 8, oz, true);
+    if (withAttrs) {
+      const nx = cloud.normals[p], ny = cloud.normals[p + 1], nz = cloud.normals[p + 2];
+      dv.setFloat32(off + 12, tr.m00 * nx + tr.m01 * ny + tr.m02 * nz, true);
+      dv.setFloat32(off + 16, tr.m10 * nx + tr.m11 * ny + tr.m12 * nz, true);
+      dv.setFloat32(off + 20, tr.m20 * nx + tr.m21 * ny + tr.m22 * nz, true);
+      const rgb = (cloud.colors[p] << 16) | (cloud.colors[p + 1] << 8) | cloud.colors[p + 2];
+      dv.setUint32(off + 24, rgb >>> 0, true); // PCD 的 rgb 字段以 float 位模式存储
+    }
+    off += stride;
+  }
+  return new Blob([pcdHeader(cloud.count, true, withAttrs), body], { type: 'application/octet-stream' });
+}
+
+function exportAsciiPCD(cloud) {
+  const withAttrs = pcdAttrsInput.checked;
+  const tr = buildPcdTransform();
+  const parts = [pcdHeader(cloud.count, false, withAttrs)];
+  const f = x => Number.isFinite(x) ? x.toExponential(7) : '0';
+  const bits = new ArrayBuffer(4);
+  const u32 = new Uint32Array(bits);
+  const f32 = new Float32Array(bits);
+  const batch = [];
+
+  for (let i = 0; i < cloud.count; i++) {
+    const p = i * 3;
+    const x = cloud.positions[p], y = cloud.positions[p + 1], z = cloud.positions[p + 2];
+    const ox = tr.m00 * x + tr.m01 * y + tr.m02 * z + tr.tx;
+    const oy = tr.m10 * x + tr.m11 * y + tr.m12 * z + tr.ty;
+    const oz = tr.m20 * x + tr.m21 * y + tr.m22 * z + tr.tz;
+    let line = f(ox) + ' ' + f(oy) + ' ' + f(oz);
+    if (withAttrs) {
+      const nx = cloud.normals[p], ny = cloud.normals[p + 1], nz = cloud.normals[p + 2];
+      const onx = tr.m00 * nx + tr.m01 * ny + tr.m02 * nz;
+      const ony = tr.m10 * nx + tr.m11 * ny + tr.m12 * nz;
+      const onz = tr.m20 * nx + tr.m21 * ny + tr.m22 * nz;
+      const rgb = (cloud.colors[p] << 16) | (cloud.colors[p + 1] << 8) | cloud.colors[p + 2];
+      u32[0] = rgb >>> 0;
+      line += ' ' + f(onx) + ' ' + f(ony) + ' ' + f(onz) + ' ' + f(f32[0]);
+    }
+    batch.push(line + '\n');
+    if (batch.length >= 20000) {
+      parts.push(batch.join(''));
+      batch.length = 0;
+    }
+  }
+  if (batch.length) parts.push(batch.join(''));
+  return new Blob(parts, { type: 'text/plain' });
+}
+
+/* ========== 3D 预览 ========== */
+const viewer = $('viewer');
+let renderer, scene, camera, controls, modelGroup, gridHelper, hemiLight, dirLight;
+let modelBox = null;   // 当前模型包围盒,用于取景和切换上方向
+
+/* 创建 / 重建 OrbitControls。
+   three.js 的 OrbitControls 只在构造时根据 camera.up 计算一次内部旋转基准四元数,
+   之后就算再改 camera.up,拖拽旋转也不会跟着变 —— 这正是切换"上方向"后
+   鼠标转起来很怪的原因。所以每次 camera.up 改变后都重新构造一次控件。
+   同时限制极角,避免拖到顶/底时视角整个翻过去,转动手感会更稳定。 */
+function buildControls(prevTarget) {
+  if (controls) controls.dispose();
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.9;
+  controls.minPolarAngle = 0.001;
+  controls.maxPolarAngle = Math.PI - 0.001;
+  if (prevTarget) controls.target.copy(prevTarget);
+  controls.update();
+}
+
+function initViewer() {
+  if (renderer) return;
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  viewer.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
+  camera.up.set(0, 0, 1);              // 与 IFC 一致:Z 轴朝上
+  camera.position.set(12, -12, 9);
+
+  buildControls();
+
+  hemiLight = new THREE.HemisphereLight(0xdfe8f5, 0x2a2f36, 1.1);
+  hemiLight.position.set(0, 0, 1);
+  scene.add(hemiLight);
+
+  dirLight = new THREE.DirectionalLight(0xffffff, 1.6);
+  dirLight.position.set(1, -1.5, 2.5);
+  scene.add(dirLight);
+
+  const resize = () => {
+    const w = viewer.clientWidth, h = viewer.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(viewer);
+  resize();
+
+  renderer.setAnimationLoop(() => {
+    controls.update();
+    renderer.render(scene, camera);
+  });
+}
+
+/* 按当前 upAxis 摆正灯光、地面网格和相机;reframe 为真时重置机位 */
+function applyUpAxis(reframe) {
+  if (!renderer) return;
+
+  const prevTarget = controls.target.clone();
+
+  if (upAxis === 'z') {
+    camera.up.set(0, 0, 1);
+    hemiLight.position.set(0, 0, 1);
+    dirLight.position.set(1, -1.5, 2.5);
+  } else {
+    camera.up.set(0, 1, 0);
+    hemiLight.position.set(0, 1, 0);
+    dirLight.position.set(1, 2, 1.5);
+  }
+
+  // camera.up 变了,重建控件让拖拽旋转的基准跟着更新
+  buildControls(prevTarget);
+
+  if (!modelBox) { controls.update(); return; }
+
+  const center = modelBox.getCenter(new THREE.Vector3());
+  const size = modelBox.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z, 1);
+
+  // 地面网格跟着上方向翻转
+  if (gridHelper) { scene.remove(gridHelper); gridHelper.dispose(); }
+  gridHelper = new THREE.GridHelper(radius * 3, 30, 0x39506b, 0x243547);
+  if (upAxis === 'z') {
+    gridHelper.rotation.x = Math.PI / 2;                        // 网格躺进 XY 平面
+    gridHelper.position.set(center.x, center.y, modelBox.min.z);
+  } else {
+    gridHelper.position.set(center.x, modelBox.min.y, center.z);
+  }
+  scene.add(gridHelper);
+
+  camera.near = radius / 100;
+  camera.far = radius * 20;
+  if (reframe) {
+    if (upAxis === 'z') {
+      camera.position.set(center.x + radius * 1.1, center.y - radius * 1.1, center.z + radius * 0.8);
+    } else {
+      camera.position.set(center.x + radius * 1.1, center.y + radius * 0.8, center.z + radius * 1.1);
+    }
+  }
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}
+
+function applyOutputTransformToPreview(reframe = true) {
+  if (!modelGroup) return;
+  modelGroup.matrixAutoUpdate = false;
+  if (outputType === 'pcd') {
+    const tr = buildPcdTransform();
+    modelGroup.matrix.set(
+      tr.m00, tr.m01, tr.m02, tr.tx,
+      tr.m10, tr.m11, tr.m12, tr.ty,
+      tr.m20, tr.m21, tr.m22, tr.tz,
+      0, 0, 0, 1
+    );
+    viewerTag.textContent = 'PCD 实际旋转：' + rotationSummary(tr) + ' · 拖动视角';
+  } else {
+    modelGroup.matrix.identity();
+    viewerTag.textContent = '拖动视角 · 滚轮缩放 · 右键平移';
+  }
+  modelGroup.updateMatrixWorld(true);
+  modelBox = new THREE.Box3().setFromObject(modelGroup);
+  applyUpAxis(reframe);
+}
+
+function showMeshPreview() {
+  initViewer();
+  $('viewerEmpty').style.display = 'none';
+
+  // 清理旧模型
+  if (modelGroup) {
+    modelGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    scene.remove(modelGroup);
+  }
+
+  // 合并为一个非索引网格(带顶点色)
+  const count = totalTris * 3;
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  const col = new Float32Array(count * 3);
+  let p = 0;
+  for (const c of chunks) {
+    const r = c.color ? c.color.x : 0.72;
+    const g = c.color ? c.color.y : 0.74;
+    const b = c.color ? c.color.z : 0.76;
+    for (let t = 0; t < c.idx.length; t++) {
+      const vi = c.idx[t] * 3;
+      pos[p] = c.pos[vi]; pos[p + 1] = c.pos[vi + 1]; pos[p + 2] = c.pos[vi + 2];
+      nor[p] = c.nor[vi]; nor[p + 1] = c.nor[vi + 1]; nor[p + 2] = c.nor[vi + 2];
+      col[p] = r; col[p + 1] = g; col[p + 2] = b;
+      p += 3;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, side: THREE.DoubleSide, metalness: 0, roughness: 0.9
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // 模型不做任何旋转:保持 IFC 原始坐标,屏幕上看到的即导出 STL 里的坐标,
+  // 竖直方向交给相机的 up 向量处理。
+  modelGroup = new THREE.Group();
+  modelGroup.add(mesh);
+  scene.add(modelGroup);
+
+  applyOutputTransformToPreview(true);
+}
+
+
+function showPointPreview(cloud) {
+  initViewer();
+  $('viewerEmpty').style.display = 'none';
+
+  if (modelGroup) {
+    modelGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    scene.remove(modelGroup);
+  }
+
+  // 浏览器预览最多绘制 300,000 点；导出的 PCD 仍保留全部点。
+  const stride = Math.max(1, Math.ceil(cloud.count / 300000));
+  const previewCount = Math.ceil(cloud.count / stride);
+  const positions = new Float32Array(previewCount * 3);
+  const colors = new Uint8Array(previewCount * 3);
+  let q = 0;
+  for (let i = 0; i < cloud.count && q < previewCount; i += stride, q++) {
+    const src = i * 3, dst = q * 3;
+    positions[dst] = cloud.positions[src];
+    positions[dst + 1] = cloud.positions[src + 1];
+    positions[dst + 2] = cloud.positions[src + 2];
+    colors[dst] = cloud.colors[src];
+    colors[dst + 1] = cloud.colors[src + 1];
+    colors[dst + 2] = cloud.colors[src + 2];
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Uint8BufferAttribute(colors, 3, true));
+  geo.computeBoundingBox();
+  const size = geo.boundingBox.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z, 1);
+  const mat = new THREE.PointsMaterial({ vertexColors: true, size: radius * 0.0016, sizeAttenuation: true });
+
+  modelGroup = new THREE.Group();
+  modelGroup.add(new THREE.Points(geo, mat));
+  scene.add(modelGroup);
+  applyOutputTransformToPreview(true);
+}
+
+/* ========== 主流程 ========== */
+function formatArea(area) {
+  if (!Number.isFinite(area)) return '—';
+  if (area >= 1000000) return (area / 1000000).toFixed(3) + ' ×10⁶';
+  return area.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function updateSizeEstimate() {
+  if (!chunks.length) { setStat('stSize', '—'); return; }
+  if (outputType === 'stl') {
+    const bytes = format === 'binary' ? 84 + totalTris * 50 : totalTris * 230;
+    setStat('stSize', fmtBytes(bytes) + (format === 'binary' ? '' : '（约）'));
+    return;
+  }
+  try {
+    const count = pointCloud && pointCloud.key === pcdSettingsKey() ? pointCloud.count : estimatePcdPointCount();
+    const stride = pcdAttrsInput.checked ? 28 : 12;
+    const bytes = format === 'binary' ? count * stride + 300 : count * (pcdAttrsInput.checked ? 115 : 48) + 300;
+    setStat('stPoint', (pointCloud && pointCloud.key === pcdSettingsKey() ? '' : '约 ') + count.toLocaleString());
+    setStat('stSize', fmtBytes(bytes) + (format === 'binary' ? '' : '（约）'));
+  } catch (e) {
+    setStat('stPoint', '参数错误');
+    setStat('stSize', '—');
+  }
+}
+
+function invalidatePointCloud() {
+  pointCloud = null;
+  updateSizeEstimate();
+}
+
+async function handleFile(file) {
+  if (!file) return;
+  if (!/\.ifc$/i.test(file.name)) {
+    setStatus('仅支持 .ifc 文件。', 'err');
+    return;
+  }
+  baseName = file.name.replace(/\.ifc$/i, '');
+  downloadBtn.disabled = true;
+  generatePcdBtn.disabled = true;
+  chunks = []; totalTris = 0; totalVerts = 0; totalSurfaceArea = 0; pointCloud = null; sourceBounds = null;
+  setStat('stFile', file.name.length > 22 ? file.name.slice(0, 20) + '…' : file.name);
+  ['stMesh', 'stTri', 'stVert', 'stArea', 'stPoint', 'stSize'].forEach(id => setStat(id, '—'));
+
+  try {
+    await ensureEngine();
+
+    setStatus('正在读取文件（' + fmtBytes(file.size) + '）…', '', true);
+    await nextFrame();
+    const buffer = new Uint8Array(await file.arrayBuffer());
+
+    setStatus('正在解析 IFC 并生成三角网格，较大模型请耐心等待…', '', true);
+    await nextFrame();
+    const modelID = ifcAPI.OpenModel(buffer);
+    let result;
+    try {
+      result = extractAllGeometry(modelID);
+    } finally {
+      ifcAPI.CloseModel(modelID);
+    }
+
+    chunks = result.chunks;
+    totalTris = result.totalTris;
+    totalVerts = result.totalVerts;
+    totalSurfaceArea = result.totalSurfaceArea;
+    sourceBounds = computeSourceBounds();
+
+    if (totalTris === 0) {
+      setStatus('解析完成，但未提取到任何几何体。请确认该 IFC 含有三维构件。', 'err');
+      return;
+    }
+
+    setStat('stMesh', chunks.length.toLocaleString());
+    setStat('stTri', totalTris.toLocaleString());
+    setStat('stVert', totalVerts.toLocaleString());
+    setStat('stArea', formatArea(totalSurfaceArea) + ' 平方模型单位');
+    updateSizeEstimate();
+
+    setStatus('正在生成三角网格预览…', '', true);
+    await nextFrame();
+    showMeshPreview();
+
+    downloadBtn.disabled = false;
+    generatePcdBtn.disabled = false;
+    setStatus(outputType === 'stl'
+      ? '解析完成，可下载 STL。坐标与单位保持 IFC 原值。'
+      : '解析完成。设置点间距后生成规则点云预览，或直接下载 PCD。', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus('转换失败：' + (e && e.message ? e.message : e), 'err');
+  }
+}
+
+downloadBtn.addEventListener('click', async () => {
+  if (!chunks.length) return;
+  downloadBtn.disabled = true;
+  try {
+    let blob, ext;
+    if (outputType === 'stl') {
+      setStatus('正在生成 ' + (format === 'binary' ? '二进制' : 'ASCII') + ' STL…', '', true);
+      await nextFrame();
+      blob = format === 'binary' ? exportBinarySTL() : exportAsciiSTL();
+      ext = 'stl';
+    } else {
+      setStatus('正在准备 PCD 点云…', '', true);
+      await nextFrame();
+      const cloud = await generatePointCloud(false);
+      setStatus('正在编码 ' + (format === 'binary' ? '二进制' : 'ASCII') + ' PCD（' + rotationSummary() + '）…', '', true);
+      await nextFrame();
+      blob = format === 'binary' ? exportBinaryPCD(cloud) : exportAsciiPCD(cloud);
+      ext = 'pcd';
+      showPointPreview(cloud);
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = baseName + '.' + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setStatus('已导出 ' + a.download + '（' + fmtBytes(blob.size) + '）' +
+      (outputType === 'pcd' ? '；旋转：' + rotationSummary() + '。' : '。'), 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus('导出失败：' + (e && e.message ? e.message : e) +
+      (format === 'ascii' ? ' — 大模型请改用二进制格式。' : ''), 'err');
+  } finally {
+    downloadBtn.disabled = !chunks.length;
+  }
+});
+
+generatePcdBtn.addEventListener('click', async () => {
+  if (!chunks.length) return;
+  generatePcdBtn.disabled = true;
+  downloadBtn.disabled = true;
+  try {
+    const cloud = await generatePointCloud(true);
+    showPointPreview(cloud);
+    setStatus('点云已生成：' + cloud.count.toLocaleString() + ' 点；当前导出旋转：' + rotationSummary() + '。预览最多显示 300,000 点。', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus('点云生成失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    generatePcdBtn.disabled = !chunks.length;
+    downloadBtn.disabled = !chunks.length;
+  }
+});
+
+/* ========== 交互：目标格式 / 编码 / 参数 / 上方向 / 文件 ========== */
+function setOutputType(type) {
+  outputType = type;
+  outStl.classList.toggle('active', type === 'stl');
+  outPcd.classList.toggle('active', type === 'pcd');
+  pcdOptions.classList.toggle('hidden', type !== 'pcd');
+  $('pipelineOut').textContent = type.toUpperCase();
+  $('formatLabel').textContent = type.toUpperCase() + ' 编码';
+  $('stSizeLabel').textContent = type.toUpperCase() + ' 预计大小';
+  fmtBin.textContent = '二进制 ' + type.toUpperCase();
+  fmtAsc.textContent = 'ASCII ' + type.toUpperCase();
+  $('formatNote').textContent = type === 'stl'
+    ? '二进制体积小、速度快，推荐使用；ASCII 为纯文本，大模型不建议。'
+    : '二进制 PCD 读写更快；ASCII PCD 可直接查看，但百万点文件会很大。';
+  downloadBtn.textContent = '下载 ' + type.toUpperCase();
+  updateSizeEstimate();
+
+  if (chunks.length) {
+    if (type === 'pcd' && pointCloud && pointCloud.key === pcdSettingsKey()) showPointPreview(pointCloud);
+    else showMeshPreview();
+    setStatus(type === 'stl' ? '已切换为 STL 输出。' : '已切换为 PCD 输出；点云按固定间距规则采样，不使用随机数。', 'ok');
+  }
+}
+outStl.addEventListener('click', () => setOutputType('stl'));
+outPcd.addEventListener('click', () => setOutputType('pcd'));
+
+function setFormat(f) {
+  format = f;
+  fmtBin.classList.toggle('active', f === 'binary');
+  fmtAsc.classList.toggle('active', f === 'ascii');
+  updateSizeEstimate();
+}
+fmtBin.addEventListener('click', () => setFormat('binary'));
+fmtAsc.addEventListener('click', () => setFormat('ascii'));
+
+[pointSpacingInput, pcdAttrsInput].forEach(el => {
+  el.addEventListener('change', invalidatePointCloud);
+  el.addEventListener('input', updateSizeEstimate);
+});
+
+let rotationPreviewTimer = null;
+function refreshRotationPreview(showMessage = false) {
+  try {
+    const tr = buildPcdTransform();
+    if (outputType === 'pcd' && modelGroup) applyOutputTransformToPreview(true);
+    if (showMessage && chunks.length) setStatus('PCD 导出旋转已更新：' + rotationSummary(tr) + '。', 'ok');
+  } catch (e) {
+    setStatus('旋转参数错误：' + (e && e.message ? e.message : e), 'err');
+  }
+}
+
+[rotXInput, rotYInput, rotZInput].forEach(el => {
+  el.addEventListener('input', () => {
+    clearTimeout(rotationPreviewTimer);
+    rotationPreviewTimer = setTimeout(() => refreshRotationPreview(false), 100);
+  });
+  el.addEventListener('change', () => refreshRotationPreview(true));
+});
+
+function setRotationPivot(pivot) {
+  rotationPivot = pivot;
+  pivotCenterBtn.classList.toggle('active', pivot === 'center');
+  pivotOriginBtn.classList.toggle('active', pivot === 'origin');
+  refreshRotationPreview(true);
+}
+pivotCenterBtn.addEventListener('click', () => setRotationPivot('center'));
+pivotOriginBtn.addEventListener('click', () => setRotationPivot('origin'));
+resetRotationBtn.addEventListener('click', () => {
+  rotXInput.value = '0'; rotYInput.value = '0'; rotZInput.value = '0';
+  refreshRotationPreview(true);
+});
+
+function setUpAxis(axis) {
+  if (upAxis === axis) return;
+  upAxis = axis;
+  upZBtn.classList.toggle('active', axis === 'z');
+  upYBtn.classList.toggle('active', axis === 'y');
+  applyUpAxis(true);
+}
+upZBtn.addEventListener('click', () => setUpAxis('z'));
+upYBtn.addEventListener('click', () => setUpAxis('y'));
+resetViewBtn.addEventListener('click', () => applyUpAxis(true));
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+
+['dragenter', 'dragover'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
+dropzone.addEventListener('drop', e => {
+  e.stopPropagation();
+  handleFile(e.dataTransfer.files[0]);
+});
+
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
